@@ -4,6 +4,80 @@ Practical reference: what to run, what the numbers mean, what it can't do.
 
 ---
 
+## Start here — phone only, no camera calibration
+
+```bash
+python run_hand.py
+```
+
+The phone alone is a complete tracker. It measures 21 landmarks, a depth at
+each, and reports its own intrinsics, so metric 3D needs no camera calibration
+at all: a pixel fixes the direction, the depth fixes the distance.
+
+Start HandBridge on the phone first (address from `python tools/whats_my_ip.py`,
+port 9870).
+
+### Calibrating the screen
+
+The one calibration that remains is finding your *screen* in 3D. Point your
+index finger at each corner and press SPACE — all four corners, twice, from two
+hand positions **at least 30 cm apart**.
+
+The second pass is not busywork. One ray per corner fixes only a direction; the
+distance to the screen stays unknown. Two rays from different places intersect
+at a point, which is what actually locates it. Measured: passes 30 cm apart give
+25 mm corner accuracy, 3 cm apart give 150 mm, 1 cm apart give 423 mm.
+
+When it finishes it prints the screen size it recovered. **Your screen is 15.5
+inches — if it reports something close, the calibration is good.** More than a
+couple of inches off means redo it with `c`, aiming more carefully.
+
+### Pointing modes — press `m` to cycle
+
+Measured on a 15.5-inch screen at 40 cm with 2 mm of tracking jitter
+(`python tools/test_pointing.py`):
+
+| mode | cursor jitter | hand travel to cross screen | feel |
+|---|---|---|---|
+| **absolute** | **7 px** | 47 cm | steadiest; hand must stay in a region |
+| relative | 8 px | 72 cm | trackpad with gain; works from anywhere |
+| eye ray | 28 px | 36 cm | point naturally; less precise |
+| finger ray | 100 px | 39 cm | most direct, least steady |
+
+Try them in that order. **Absolute is four times steadier than the best ray**,
+because a ray amplifies hand jitter by roughly (distance to screen) / (lever
+arm), while absolute mapping does not amplify at all.
+
+This contradicts published studies that find ray-casting better — those measure
+VR, where targets are metres away and physically unreachable so absolute mapping
+is impossible. At a desk the screen is within arm's reach and the geometry
+reverses. Whether it *feels* better is yours to judge; that is why all four are
+switchable at runtime.
+
+### Controls
+
+| key | does | works unfocused |
+|---|---|---|
+| `m` | cycle pointing mode | preview window |
+| `SPACE` | record a calibration sample | preview window |
+| `c` | redo screen calibration | preview window |
+| `p` | prediction on/off | preview window |
+| **`F9`** | cursor control on/off | **yes** |
+| **`F10`** | clicking on/off | **yes** |
+| **`ESC`** | emergency stop | **yes** |
+| `q` | quit | preview window |
+
+Cursor control and clicking start **off**. Turn them on deliberately: once a
+tracker owns your pointer, the usual way to stop it is clicking, which is the
+thing you have lost control of. F9/F10/ESC read the keyboard directly so they
+work whatever is in front.
+
+Pinch thumb to index to click; hold to drag.
+
+---
+
+## Adding the laptop camera (optional)
+
 ## Where to put the phone
 
 Computed by searching placements against coverage and triangulation angle

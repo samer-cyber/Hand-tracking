@@ -54,6 +54,7 @@ class HandBridgeFrame:
     phone_capture_time: float   # phone clock, when the frame was grabbed
     phone_send_time: float      # phone clock, just before transmit
     index: int                  # sequence number from the phone
+    orientation: int            # 0 portrait, 1 land-left, 2 land-right, 3 upside-down
 
     @property
     def image(self):
@@ -170,7 +171,7 @@ class HandBridgeSource:
         capture_t, send_t = fields[2], fields[3]
         width, height = fields[4], fields[5]
         fx, fy, cx, cy = fields[6:10]
-        chirality, has_hand, _has_depth, _pad = fields[10:14]
+        chirality, has_hand, _has_depth, orientation = fields[10:14]
         block = np.array(fields[14:], dtype=np.float64).reshape(LANDMARKS, 4)
 
         K = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float64)
@@ -186,6 +187,7 @@ class HandBridgeSource:
             phone_capture_time=capture_t,
             phone_send_time=send_t,
             index=int(seq),
+            orientation=int(orientation),
         )
 
     # -- reading --------------------------------------------------------------
@@ -239,7 +241,7 @@ class HandBridgeSource:
 def encode_packet(seq: int, capture_t: float, send_t: float, width: int, height: int,
                   fx: float, fy: float, cx: float, cy: float, chirality: int,
                   pixels: np.ndarray | None, depth: np.ndarray | None,
-                  confidence: np.ndarray | None) -> bytes:
+                  confidence: np.ndarray | None, orientation: int = 0) -> bytes:
     """Build a packet exactly as the Swift sender does.
 
     Kept beside the decoder so the wire format has a single definition on this
@@ -256,5 +258,47 @@ def encode_packet(seq: int, capture_t: float, send_t: float, width: int, height:
     return struct.pack(
         PACKET, MAGIC, seq, capture_t, send_t, width, height,
         fx, fy, cx, cy,
-        chirality, 1 if pixels is not None else 0, 1 if depth is not None else 0, 0,
-        *block.ravel().tolist())
+        chirality, 1 if pixels is not None else 0, 1 if depth is not None else 0,
+        orientation, *block.ravel().tolist())
+
+
+def rotate_landmarks(pixels: np.ndarray, K: np.ndarray, width: int, height: int,
+                     quarter_turns: int) -> tuple[np.ndarray, np.ndarray, int, int]:
+    """Rotate landmarks and intrinsics together by 90-degree steps.
+
+    The camera buffer stays landscape however the phone is held, so landmarks
+    arrive turned relative to the user's own frame. Applying the rotation here
+    rather than on the phone keeps the landmark coordinates and the intrinsics
+    guaranteed consistent -- rotating one without the other is a silent error
+    that reconstructs a plausible but wrong hand.
+
+    Returns the rotated pixels, intrinsics, width and height.
+    """
+    turns = int(quarter_turns) % 4
+    px = np.asarray(pixels, dtype=np.float64).copy()
+    fx, fy = K[0, 0], K[1, 1]
+    cx, cy = K[0, 2], K[1, 2]
+    w, h = int(width), int(height)
+
+    for _ in range(turns):
+        # One clockwise quarter turn: (x, y) -> (h - 1 - y, x).
+        x, y = px[:, 0].copy(), px[:, 1].copy()
+        px[:, 0] = (h - 1) - y
+        px[:, 1] = x
+        fx, fy = fy, fx
+        cx, cy = (h - 1) - cy, cx
+        w, h = h, w
+
+    K2 = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]])
+    return px, K2, w, h
+
+
+def turns_for_orientation(orientation: int) -> int:
+    """Quarter turns that bring a landscape buffer upright for the user.
+
+    Values verified against the device rather than derived: the mapping between
+    a sensor's native orientation and the physical device is not something to
+    infer confidently, so this is the starting guess and the runtime override
+    exists precisely because it may be wrong.
+    """
+    return {0: 1, 1: 0, 2: 2, 3: 3}.get(int(orientation), 0)

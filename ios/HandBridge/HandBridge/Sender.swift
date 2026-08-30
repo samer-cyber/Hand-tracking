@@ -5,6 +5,8 @@ import simd
 
 /// One frame's worth of hand data, as it goes onto the wire.
 struct HandPacket {
+    /// 0 portrait, 1 landscape-left, 2 landscape-right, 3 upside-down, 255 unknown.
+    let orientation: UInt8
     let sequence: UInt32
     let captureTime: Double       // phone clock, seconds, taken at frame arrival
     let sendTime: Double          // phone clock, seconds, just before transmit
@@ -100,7 +102,9 @@ final class PacketSender: ObservableObject {
         data.append(p.chirality)
         data.append(p.landmarks != nil ? 1 : 0)
         data.append(p.depth != nil ? 1 : 0)
-        data.append(0)   // padding, keeps the landmark block 4-byte aligned
+        // Was padding; now carries the device orientation, which keeps the
+        // packet the same size and avoids a protocol version bump.
+        data.append(p.orientation)
 
         for i in 0..<Self.landmarkCount {
             let pt = p.landmarks?[i] ?? SIMD2<Float>(.nan, .nan)

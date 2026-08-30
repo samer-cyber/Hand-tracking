@@ -3,6 +3,7 @@ import CoreVideo
 import Foundation
 import QuartzCore
 import simd
+import UIKit
 import Vision
 
 /// Captures the front TrueDepth camera, finds hand landmarks on-device, samples
@@ -46,6 +47,14 @@ final class CaptureEngine: NSObject, ObservableObject {
 
     private var sender: PacketSender?
     private var sequence: UInt32 = 0
+    /// Physical device orientation, sent with every packet.
+    ///
+    /// The camera buffer is landscape regardless of how the phone is held, so
+    /// landmarks arrive rotated relative to the user's own frame. Rather than
+    /// rotating here and risking a mismatch with the intrinsics, the raw frame
+    /// is sent along with the orientation, and the desktop applies the turn --
+    /// which also means the rotation can be corrected without rebuilding the app.
+    private var orientationCode: UInt8 = 255
     private var lastStamp: CFTimeInterval = 0
     private var smoothedFPS: Double = 0
 
@@ -62,6 +71,23 @@ final class CaptureEngine: NSObject, ObservableObject {
 
     func configure(sender: PacketSender) {
         self.sender = sender
+        DispatchQueue.main.async {
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            self.updateOrientation()
+            NotificationCenter.default.addObserver(
+                forName: UIDevice.orientationDidChangeNotification,
+                object: nil, queue: .main) { [weak self] _ in self?.updateOrientation() }
+        }
+    }
+
+    private func updateOrientation() {
+        switch UIDevice.current.orientation {
+        case .portrait: orientationCode = 0
+        case .landscapeLeft: orientationCode = 1
+        case .landscapeRight: orientationCode = 2
+        case .portraitUpsideDown: orientationCode = 3
+        default: break                    // face up/down: keep the last known
+        }
     }
 
     func start() {
@@ -157,36 +183,35 @@ final class CaptureEngine: NSObject, ObservableObject {
                 defer { device.unlockForConfiguration() }
                 device.activeFormat = format
 
-                // Selecting the video format does NOT select a depth format, and
-                // the choice matters more than it looks. Ranking depth formats by
-                // resolution picks one that runs at half the video rate, so every
-                // other frame arrives with no depth partner -- measured as depth
-                // alternating 21/21, 0/21, 21/21 on consecutive frames.
+                // Selecting the video format does NOT select a depth format,
+                // and the choice matters twice over.
                 //
-                // Rank by frame rate first, resolution second, for the same
-                // reason as the video format: a depth sample that exists is worth
-                // more than a sharper one that is missing.
-                let depthFormat = format.supportedDepthDataFormats.max { a, b in
-                    let ra = a.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
-                    let rb = b.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
-                    if ra != rb { return ra < rb }
-                    return CMVideoFormatDescriptionGetDimensions(a.formatDescription).width
-                        < CMVideoFormatDescriptionGetDimensions(b.formatDescription).width
+                // First for correctness: the depth map must cover the same
+                // field of view as the colour image, or the per-landmark depth
+                // lookup reads from the wrong place. Aspect ratio is the
+                // check available here, so it comes first.
+                //
+                // Then for rate: ranking by resolution picks a stream running
+                // at half the video rate, so every other frame has no depth
+                // partner.
+                let videoAspect = Double(CMVideoFormatDescriptionGetDimensions(
+                    format.formatDescription).width)
+                    / Double(max(1, CMVideoFormatDescriptionGetDimensions(
+                        format.formatDescription).height))
+
+                func depthScore(_ f: AVCaptureDevice.Format) -> (Int, Double, Int) {
+                    let d = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+                    let a = d.height == 0 ? 0 : Double(d.width) / Double(d.height)
+                    let matched = abs(a - videoAspect) < 0.02 ? 1 : 0
+                    let rate = f.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+                    return (matched, rate, Int(d.width))
                 }
+                let depthFormat = format.supportedDepthDataFormats
+                    .max { depthScore($0) < depthScore($1) }
                 if let depthFormat {
                     device.activeDepthDataFormat = depthFormat
                 }
 
-                // Video runs at its own maximum rather than being held back to
-                // the depth rate. If depth tops out at 30 Hz while video can do
-                // 60, capping would halve the landmark rate to make depth appear
-                // on every frame -- which trades a real latency improvement for
-                // a cosmetic one.
-                //
-                // Landmarks arriving twice as often directly halves sampling
-                // latency, and latency is the weakest axis of this whole system.
-                // Depth is an optional measurement to the fusion filter, so
-                // arriving on alternate frames costs it very little.
                 let videoRate = format.videoSupportedFrameRateRanges
                     .map(\.maxFrameRate).max() ?? 30
                 let depthRate = depthFormat?.videoSupportedFrameRateRanges
@@ -198,8 +223,17 @@ final class CaptureEngine: NSObject, ObservableObject {
                 let dsize = depthFormat
                     .map { CMVideoFormatDescriptionGetDimensions($0.formatDescription) }
                     .map { "\($0.width)x\($0.height)" } ?? "none"
-                let summary = "\(dims.width)x\(dims.height)@\(Int(videoRate))  "
+                var summary = "\(dims.width)x\(dims.height)@\(Int(videoRate))  "
                     + "depth \(dsize)@\(Int(depthRate))"
+                if let dd = depthFormat.map({ CMVideoFormatDescriptionGetDimensions($0.formatDescription) }) {
+                    let va = Double(dims.width) / Double(max(1, dims.height))
+                    let da = Double(dd.width) / Double(max(1, dd.height))
+                    if abs(va - da) > 0.02 {
+                        // Not cosmetic: unequal fields of view make every depth
+                        // sample belong to the wrong pixel.
+                        summary += "  ASPECT MISMATCH"
+                    }
+                }
                 DispatchQueue.main.async { self.formatSummary = summary }
             } catch {
                 // Not fatal: the session preset already provides a usable format,
@@ -218,23 +252,39 @@ final class CaptureEngine: NSObject, ObservableObject {
         report("streaming")
     }
 
-    /// Prefer a depth-capable format, fastest first, then highest resolution.
+    /// Prefer a depth-capable format whose ASPECT RATIO matches its depth stream.
     ///
-    /// Frame rate outranks resolution because the sensor rate sets the floor on
-    /// latency, which no amount of downstream work can recover. Among equally
-    /// fast formats more pixels are better, since 3D error scales linearly with
-    /// landmark pixel noise and more pixels on the hand means less of it.
+    /// This ordering is not a preference, it is a correctness requirement.
+    /// Depth is looked up per landmark by scaling colour-image pixel coordinates
+    /// into depth-map coordinates. That scaling is only valid when both cover
+    /// the same field of view. Pair a 16:9 colour stream with a 4:3 depth map
+    /// and every landmark still receives a depth value -- so nothing looks
+    /// broken -- but each one is read from the wrong part of the scene.
+    ///
+    /// The resulting 3D hand is distorted rather than absent, which then breaks
+    /// pinch detection, screen calibration and pointing simultaneously, each
+    /// looking like an independent bug.
+    ///
+    /// After aspect match, frame rate outranks resolution: the sensor rate sets
+    /// a floor on latency that no downstream work can recover, while extra
+    /// pixels only reduce landmark noise.
     private func bestFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
-        device.formats
-            .filter { !$0.supportedDepthDataFormats.isEmpty }
-            .max { a, b in
-                let ra = a.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
-                let rb = b.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
-                if ra != rb { return ra < rb }
-                let da = CMVideoFormatDescriptionGetDimensions(a.formatDescription)
-                let db = CMVideoFormatDescriptionGetDimensions(b.formatDescription)
-                return da.width < db.width
+        func aspect(_ d: CMVideoDimensions) -> Double {
+            d.height == 0 ? 0 : Double(d.width) / Double(d.height)
+        }
+        func score(_ f: AVCaptureDevice.Format) -> (Int, Double, Int) {
+            let vd = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+            let va = aspect(vd)
+            // Does ANY of this format's depth streams share its aspect ratio?
+            let matched = f.supportedDepthDataFormats.contains { df in
+                abs(aspect(CMVideoFormatDescriptionGetDimensions(df.formatDescription)) - va) < 0.02
             }
+            let rate = f.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+            return (matched ? 1 : 0, rate, Int(vd.width))
+        }
+        return device.formats
+            .filter { !$0.supportedDepthDataFormats.isEmpty }
+            .max { a, b in score(a) < score(b) }
     }
 
     private func report(_ text: String) {
@@ -408,7 +458,8 @@ extension CaptureEngine: AVCaptureDataOutputSynchronizerDelegate {
         }
         lastStamp = now
 
-        let packet = HandPacket(sequence: sequence,
+        let packet = HandPacket(orientation: orientationCode,
+                                sequence: sequence,
                                 captureTime: captureTime,
                                 sendTime: now,
                                 width: UInt16(width), height: UInt16(height),

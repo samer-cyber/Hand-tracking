@@ -79,6 +79,11 @@ class HandSolver:
         # considered broken rather than merely noisy.
         self.diverge_px = 40.0
         self._bad_frames = 0
+        # When depth last arrived. The phone's colour and depth streams run at
+        # different rates, so roughly every other frame has no depth -- but the
+        # state is only milliseconds old, and is far better than what the
+        # single-view fallback would produce.
+        self._last_depth_time: float | None = None
         # Set when the two views disagree so badly that the calibration, not
         # the tracking, must be at fault. Cleared by a successful realign.
         self.rig_suspect = False
@@ -232,10 +237,20 @@ class HandSolver:
         if has_depth:
             if ekf.update_depth(self.rig_b, depth_b, sigma_m=0.006):
                 used.append("depth")
+                self._last_depth_time = timestamp
 
-        # With only one camera and no depth, the viewing ray is unconstrained,
-        # so supply a pose solved against the known hand size instead.
-        if len(used) == 1 and used[0] in ("laptop", "phone") and not has_depth:
+        # With only one camera and no depth the viewing ray is unconstrained, so
+        # a pose solved against the known hand size is needed to pin it.
+        #
+        # Only when depth is genuinely absent, though. Depth arriving on
+        # alternate frames is normal, and on the frames between, the state still
+        # carries a depth measurement from ~16 ms ago. Substituting the weaker
+        # single-view estimate there would inject its error at half the frame
+        # rate, which reads as a buzz at the beat frequency between the streams.
+        depth_is_stale = (self._last_depth_time is None
+                          or (timestamp - self._last_depth_time) > 0.12)
+        if (len(used) == 1 and used[0] in ("laptop", "phone")
+                and not has_depth and depth_is_stale):
             rig = self.rig_a if used[0] == "laptop" else self.rig_b
             px = px_a if used[0] == "laptop" else px_b
             world = world_a if used[0] == "laptop" else world_b

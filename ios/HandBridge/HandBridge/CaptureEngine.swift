@@ -61,7 +61,27 @@ final class CaptureEngine: NSObject, ObservableObject {
     }
 
     func start() {
-        queue.async { [weak self] in self?.setupAndRun() }
+        // Permission has to be resolved before anything touches the camera.
+        // Accessing it unauthorised is not a catchable error -- the OS kills the
+        // process outright, which is indistinguishable from a crash on Start.
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            queue.async { [weak self] in self?.setupAndRun() }
+        case .notDetermined:
+            report("requesting camera permission")
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                guard let self else { return }
+                if granted {
+                    self.queue.async { self.setupAndRun() }
+                } else {
+                    self.report("camera permission denied")
+                }
+            }
+        case .denied, .restricted:
+            report("camera denied - enable it in Settings > HandBridge")
+        @unknown default:
+            report("camera permission unavailable")
+        }
     }
 
     func stop() {
@@ -101,12 +121,15 @@ final class CaptureEngine: NSObject, ObservableObject {
         guard session.canAddOutput(depthOutput) else {
             report("cannot add depth output"); session.commitConfiguration(); return
         }
+        session.addOutput(depthOutput)
         // Filtering interpolates across holes in the dot pattern. Worth having:
         // raw TrueDepth is full of gaps at the edges of a hand, which is exactly
         // where the fingertips are.
         depthOutput.isFilteringEnabled = true
         depthOutput.alwaysDiscardsLateDepthData = true
-        session.addOutput(depthOutput)
+        // Without this the output exists but delivers nothing, and the symptom is
+        // a working app reporting zero depth coverage forever.
+        depthOutput.connection(with: .depthData)?.isEnabled = true
 
         // Ask the camera to report its own intrinsics with every frame.
         if let conn = videoOutput.connection(with: .video),
@@ -116,13 +139,38 @@ final class CaptureEngine: NSObject, ObservableObject {
 
         // Drive the sensor as fast as it will go. TrueDepth tops out at 30 Hz on
         // most devices; the desktop side predicts forward to cover the gap.
+        //
+        // Every line here is guarded because assigning activeFormat without
+        // holding the device lock, or unlocking a device that was never locked,
+        // both terminate the process rather than raising something catchable.
         if let format = bestFormat(for: device) {
-            try? device.lockForConfiguration()
-            device.activeFormat = format
-            let maxRate = format.videoSupportedFrameRateRanges
-                .map(\.maxFrameRate).max() ?? 30
-            device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: CMTimeScale(maxRate))
-            device.unlockForConfiguration()
+            // activeFormat only applies when the session defers format choice to
+            // the device; leaving a concrete preset set makes the assignment
+            // fight with the session.
+            session.sessionPreset = .inputPriority
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+                device.activeFormat = format
+                // Selecting the video format does NOT select a depth format.
+                // Leave it unset and the depth output stays silent, so pick the
+                // highest-resolution depth stream the chosen format allows.
+                if let depthFormat = format.supportedDepthDataFormats.max(by: { a, b in
+                    CMVideoFormatDescriptionGetDimensions(a.formatDescription).width
+                        < CMVideoFormatDescriptionGetDimensions(b.formatDescription).width
+                }) {
+                    device.activeDepthDataFormat = depthFormat
+                }
+                let maxRate = format.videoSupportedFrameRateRanges
+                    .map(\.maxFrameRate).max() ?? 30
+                let scale = CMTimeScale(max(1, Int32(maxRate.rounded())))
+                device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: scale)
+            } catch {
+                // Not fatal: the session preset already provides a usable format,
+                // just possibly a slower one.
+                session.sessionPreset = .vga640x480
+                report("default format (\(error.localizedDescription))")
+            }
         }
 
         session.commitConfiguration()
@@ -134,9 +182,12 @@ final class CaptureEngine: NSObject, ObservableObject {
         report("streaming")
     }
 
-    /// Prefer a format that supports depth and runs fast. Resolution beyond the
-    /// depth map's own is wasted for our purposes -- the landmark precision that
-    /// matters is limited by the detector, not by pixel count.
+    /// Prefer a depth-capable format, fastest first, then highest resolution.
+    ///
+    /// Frame rate outranks resolution because the sensor rate sets the floor on
+    /// latency, which no amount of downstream work can recover. Among equally
+    /// fast formats more pixels are better, since 3D error scales linearly with
+    /// landmark pixel noise and more pixels on the hand means less of it.
     private func bestFormat(for device: AVCaptureDevice) -> AVCaptureDevice.Format? {
         device.formats
             .filter { !$0.supportedDepthDataFormats.isEmpty }
@@ -281,10 +332,22 @@ extension CaptureEngine: AVCaptureDataOutputSynchronizerDelegate {
                                   buffer: CVPixelBuffer) -> SIMD4<Float> {
         if let attachment = CMGetAttachment(sample,
                 key: kCMSampleBufferAttachmentKey_CameraIntrinsicMatrix,
-                attachmentModeOut: nil) as? Data {
-            let matrix: matrix_float3x3 = attachment.withUnsafeBytes { $0.load(as: matrix_float3x3.self) }
-            return SIMD4<Float>(matrix.columns.0.x, matrix.columns.1.y,
-                                matrix.columns.2.x, matrix.columns.2.y)
+                attachmentModeOut: nil) as? Data,
+           attachment.count >= MemoryLayout<matrix_float3x3>.size {
+            // Copied rather than loaded in place. `load(as:)` requires the source
+            // to be correctly aligned for the type, and Data makes no such
+            // promise -- a misaligned load traps instead of failing, and this
+            // runs on every single frame.
+            var matrix = matrix_float3x3()
+            _ = withUnsafeMutableBytes(of: &matrix) { dst in
+                attachment.copyBytes(to: dst.bindMemory(to: UInt8.self),
+                                     count: MemoryLayout<matrix_float3x3>.size)
+            }
+            let fx = matrix.columns.0.x, fy = matrix.columns.1.y
+            let cx = matrix.columns.2.x, cy = matrix.columns.2.y
+            if fx.isFinite && fy.isFinite && fx > 1 && fy > 1 {
+                return SIMD4<Float>(fx, fy, cx, cy)
+            }
         }
         // Fallback: a plausible focal length for a phone front camera. The
         // desktop side is told these are estimated rather than measured.

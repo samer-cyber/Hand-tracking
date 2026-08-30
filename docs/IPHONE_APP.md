@@ -51,8 +51,12 @@ Use **Sideloadly** (simplest) — <https://sideloadly.io>, Windows version.
    machine.
 5. Click **Start**.
 
-Then on the phone: **Settings → General → VPN & Device Management** → tap your
-Apple ID → **Trust**. iOS will not launch a sideloaded app until you do this.
+Then on the phone, two steps — both required:
+
+1. **Settings → General → VPN & Device Management** → tap your Apple ID →
+   **Trust**. iOS will not launch a sideloaded app until you do.
+2. **Settings → Privacy & Security → Developer Mode** → on, then restart the
+   phone. iOS 16+ refuses to run sideloaded apps without it.
 
 ### The 7-day thing
 
@@ -63,6 +67,45 @@ step gets annoying.
 
 A paid Apple Developer account ($99/yr) extends this to a year. Not worth it
 unless this becomes something you use daily.
+
+## Rebuilding after a fix
+
+When I change the Swift, push and re-run the workflow:
+
+```bash
+git add -A && git commit -m "app fix" && git push
+```
+
+The workflow runs automatically on any push touching `ios/`. Download the new
+artifact and sideload it over the top — no need to delete the old app.
+
+---
+
+## If it crashes
+
+**Crashing the moment you press Start** was a missing `NSCameraUsageDescription`
+in the generated Info.plist. iOS kills an app instantly when it touches the
+camera without that key — it is not a catchable error, so the app cannot report
+it. Fixed by declaring the plist keys in `project.yml` rather than as a file
+XcodeGen would overwrite.
+
+If it still dies, get the actual reason:
+
+**Settings → Privacy & Security → Analytics & Improvements → Analytics Data**,
+scroll to a file starting `HandBridge-` with today's date, open it, and share
+the first ~30 lines. The `Exception Type` and the top stack frame are what
+matter.
+
+Two crash signatures worth recognising:
+
+| what you see | means |
+|---|---|
+| dies instantly on Start, no dialog | missing usage-description key, or Developer Mode off |
+| dies after a second or two | camera configuration — send the log |
+| launches, but `hand` never leaves `none` | not a crash; the detector sees no hand |
+| `depth` stuck at 0/21 | too far away, or depth format not negotiated |
+
+---
 
 ## 4. Connect it
 

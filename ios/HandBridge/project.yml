@@ -10,8 +10,24 @@ targets:
     platform: iOS
     sources:
       - path: HandBridge
+    # The plist is declared here rather than kept as a file, because XcodeGen
+    # GENERATES whatever `info.path` points at and would overwrite a hand-written
+    # one. Losing NSCameraUsageDescription that way makes iOS kill the app the
+    # instant it touches the camera -- which looks exactly like a crash on Start.
     info:
       path: HandBridge/Info.plist
+      properties:
+        CFBundleDisplayName: HandBridge
+        NSCameraUsageDescription: >-
+          HandBridge uses the front TrueDepth camera to track your hands and
+          send the landmark positions to your computer.
+        NSLocalNetworkUsageDescription: >-
+          HandBridge sends hand tracking data to your computer over your local
+          network.
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UIRequiredDeviceCapabilities: [front-facing-camera]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.handbridge.app

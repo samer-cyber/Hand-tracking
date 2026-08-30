@@ -167,6 +167,80 @@ class ScreenGeometry:
             return False
 
 
+class TouchCollector:
+    """Locates the screen corners by touching them, not by pointing at them.
+
+    This replaces ray-based corner calibration, and the reason is arithmetic.
+    A pointing ray is built from knuckle to fingertip -- a lever of about 7 cm.
+    With the 5 mm of landmark noise the tracker actually has, the ray's
+    direction is uncertain by roughly four degrees before the user has even
+    aimed. Measured, one degree of error moves the cursor 75 pixels, and
+    triangulating two such rays gives corner positions tens of centimetres out.
+    In practice it produced a 24 x 10 cm "screen" for a real 34 x 19 cm display.
+
+    Touching removes the lever entirely: the fingertip IS the corner, so corner
+    accuracy equals tracking accuracy -- millimetres instead of centimetres.
+    It also removes the ambiguity about which corner is which, since the finger
+    is physically on it, and it needs one pass rather than two.
+
+    The screen being within arm's reach is what makes this possible; it would
+    not work for a wall display or in VR, which is the situation ray-based
+    calibration is designed for.
+    """
+
+    def __init__(self, samples_per_corner: int = 8):
+        self.samples_per_corner = int(samples_per_corner)
+        self.points: dict[int, list[np.ndarray]] = {}
+
+    def reset(self) -> None:
+        self.points.clear()
+
+    def record(self, corner: int, fingertip: np.ndarray) -> int:
+        """Add one fingertip sample for a corner. Returns how many it now has."""
+        self.points.setdefault(corner, []).append(np.array(fingertip, dtype=np.float64))
+        return len(self.points[corner])
+
+    def has(self, corner: int) -> bool:
+        return len(self.points.get(corner, [])) >= 1
+
+    @property
+    def complete(self) -> bool:
+        return all(self.has(c) for c in range(4))
+
+    def next_target(self) -> int | None:
+        for c in range(4):
+            if not self.has(c):
+                return c
+        return None
+
+    def solve(self) -> np.ndarray | None:
+        """Median fingertip position per corner.
+
+        A median over several frames rather than a single sample, because the
+        detector occasionally throws one landmark badly wrong and a mean would
+        carry that straight into the screen model.
+        """
+        if not self.complete:
+            return None
+        out = np.zeros((4, 3))
+        for c in range(4):
+            arr = np.stack(self.points[c])
+            if not np.all(np.isfinite(arr)):
+                arr = arr[np.all(np.isfinite(arr), axis=1)]
+            if len(arr) == 0:
+                return None
+            out[c] = np.median(arr, axis=0)
+        return out
+
+    def spread(self, corner: int) -> float:
+        """How much the samples for a corner disagree, in metres."""
+        arr = self.points.get(corner)
+        if not arr or len(arr) < 2:
+            return 0.0
+        a = np.stack(arr)
+        return float(np.linalg.norm(a - np.median(a, axis=0), axis=1).mean())
+
+
 class CornerCollector:
     """Gathers pointing rays for each screen corner, from two hand positions.
 

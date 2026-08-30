@@ -13,7 +13,7 @@ two positions at least 30 cm apart. That builds a 3D model of the display, which
 every pointing mode then shares.
 
 Keys
-    SPACE   record a calibration sample
+    SPACE   record a corner (TOUCH it with your fingertip)
     r       rotate the phone image (fixes a sideways or mirrored hand)
     m       cycle pointing mode
     F9      cursor control on/off      (works without window focus)
@@ -45,7 +45,7 @@ from handtrack.metrics import JitterMeter, Rolling, TrackingHealth
 from handtrack.mouse import VK_ESCAPE, VK_F9, VK_F10, MouseController, VirtualScreen, _Edge, key_held
 from handtrack.pointing import MODE_HELP, Pointer
 from handtrack.runtime import Interrupt
-from handtrack.screen3d import CORNER_NAMES, CornerCollector, ScreenGeometry
+from handtrack.screen3d import CORNER_NAMES, ScreenGeometry, TouchCollector
 from handtrack.screenmap import ClickAnchor, CursorStabiliser, PinchDetector
 from handtrack.skeleton import HandModel
 from handtrack.detect import MIDDLE_MCP, WRIST
@@ -130,7 +130,7 @@ def main() -> int:
     pred = VelocityPredictor(lead_seconds=0.02, max_step=0.08)
 
     geo = ScreenGeometry(screen.width, screen.height)
-    collector = CornerCollector()
+    collector = TouchCollector()
     calibrating = args.recalibrate or not geo.load(SCREEN_CALIB)
     if not calibrating:
         diag = geo.diagonal_inches()
@@ -184,10 +184,10 @@ def main() -> int:
 
     if calibrating:
         print("\n=== screen calibration ===")
-        print("Point your index finger at a screen corner and press SPACE.")
-        print("You will do all four corners twice, from two DIFFERENT hand")
-        print("positions at least 30 cm apart. The second pass is what fixes")
-        print("the distance to the screen -- one pass only gives directions.\n")
+        print("TOUCH each corner of your screen with your index fingertip,")
+        print("then press SPACE. Four corners, once each.")
+        print("Touch it, do not point at it: the fingertip IS the corner, so")
+        print("accuracy comes from tracking rather than from how well you aim.\n")
 
     win = "Hand tracking"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
@@ -310,19 +310,17 @@ def main() -> int:
             draw_hand(canvas, pts, thickness=2, radius=3)
 
         if calibrating:
-            target = collector.next_target()
-            if target is not None:
-                c, p_i = target
-                cv2.putText(canvas, f"Point at the {CORNER_NAMES[c].upper()} corner",
-                            (20, canvas_size[0] - 74), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.75, (90, 255, 140), 2, cv2.LINE_AA)
-                cv2.putText(canvas, f"pass {p_i + 1} of 2   press SPACE",
-                            (20, canvas_size[0] - 46), cv2.FONT_HERSHEY_SIMPLEX,
+            c = collector.next_target()
+            if c is not None:
+                cv2.putText(canvas, f"TOUCH the {CORNER_NAMES[c].upper()} corner",
+                            (20, canvas_size[0] - 60), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.8, (90, 255, 140), 2, cv2.LINE_AA)
+                cv2.putText(canvas, "fingertip ON the corner, then SPACE",
+                            (20, canvas_size[0] - 32), cv2.FONT_HERSHEY_SIMPLEX,
                             0.6, (200, 200, 200), 1, cv2.LINE_AA)
-                if p_i == 1:
-                    cv2.putText(canvas, "move your hand 30+ cm from where pass 1 was",
-                                (20, canvas_size[0] - 20), cv2.FONT_HERSHEY_SIMPLEX,
-                                0.55, (80, 200, 255), 1, cv2.LINE_AA)
+                cv2.putText(canvas, f"{sum(collector.has(i) for i in range(4))}/4 corners",
+                            (20, canvas_size[0] - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.55, (150, 150, 150), 1, cv2.LINE_AA)
         else:
             state = "CONTROL ON" if mouse.enabled else "control off (F9)"
             cv2.putText(canvas, state, (20, canvas_size[0] - 20),
@@ -346,7 +344,8 @@ def main() -> int:
             ("screen", f"{geo.diagonal_inches():.1f} in" if geo.calibrated else "not set"),
             ("mode (m)", pointer.mode),
             ("cursor", f"{cursor[0]:.0f},{cursor[1]:.0f}" if cursor else "--"),
-            ("pinch", "YES" if pinch.pinching else "no"),
+            ("pinch ratio", "--" if np.isnan(pinch.ratio) else
+             f"{pinch.ratio:5.2f} {'PINCH' if pinch.pinching else ''}"),
             ("3D jitter", "hold still" if np.isnan(jitter.jitter) else f"{jitter.jitter:5.2f} mm"),
             ("control F9", "ON" if mouse.enabled else "off"),
             ("clicks F10", "ON" if mouse.clicks_enabled else "off"),
@@ -372,34 +371,36 @@ def main() -> int:
             mouse.set_enabled(False)
             print("recalibrating the screen")
         elif key == ord(" ") and calibrating and points is not None:
-            target = collector.next_target()
-            if target is not None:
-                from handtrack.pointing import finger_ray
-                ray = finger_ray(points)
-                if ray is None:
-                    print("  cannot see your index finger clearly")
+            c = collector.next_target()
+            if c is not None:
+                tip = points[INDEX_TIP]
+                if not np.all(np.isfinite(tip)):
+                    print("  cannot see your fingertip")
                 else:
-                    c, p_i = target
-                    collector.record(c, p_i, ray[0], ray[1])
-                    print(f"  {CORNER_NAMES[c]} pass {p_i + 1} recorded")
+                    collector.record(c, tip)
+                    print(f"  {CORNER_NAMES[c]} touched at "
+                          f"({tip[0]*100:6.1f},{tip[1]*100:6.1f},{tip[2]*100:6.1f}) cm")
                     if collector.complete:
                         corners = collector.solve()
-                        seps = [collector.separation(i) for i in range(4)]
                         if corners is not None and geo.set_corners(corners):
-                            geo.save(SCREEN_CALIB)
-                            calibrating = False
-                            pointer.estimate_eye(corners)
+                            diag = geo.diagonal_inches()
                             print(f"\nscreen model: {geo.size_m[0]*100:.1f} x "
-                                  f"{geo.size_m[1]*100:.1f} cm, "
-                                  f"{geo.diagonal_inches():.1f} inch diagonal")
-                            print(f"  pass separation {np.mean(seps)*100:.0f} cm "
-                                  f"(30+ is good)")
-                            if abs(geo.diagonal_inches() - 15.5) > 4:
-                                print("  That diagonal looks wrong. Redo with 'c',")
-                                print("  aiming carefully and moving further between passes.")
-                            print("  press F9 to enable the cursor, m to change mode\n")
+                                  f"{geo.size_m[1]*100:.1f} cm, {diag:.1f} inch diagonal")
+                            if 10.0 < diag < 22.0:
+                                geo.save(SCREEN_CALIB)
+                                calibrating = False
+                                pointer.estimate_eye(corners)
+                                print("  saved. F9 for the cursor, m to change mode\n")
+                            else:
+                                # Refusing to save a bad model matters: a wrong
+                                # screen makes the ray modes unusable in a way
+                                # that reads as bad tracking, not bad geometry.
+                                print("  Not a plausible laptop screen, so NOT saved.")
+                                print("  Check the hand looks upright in the preview")
+                                print("  (press r to rotate), then touch again.")
+                                collector.reset()
                         else:
-                            print("  calibration failed -- start again with 'c'")
+                            print("  calibration failed -- try again")
                             collector.reset()
 
     print("\n--- session ---")

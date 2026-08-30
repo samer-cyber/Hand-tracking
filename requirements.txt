@@ -1,0 +1,9 @@
+# Core pipeline. Already present on this machine's Python 3.14 install.
+mediapipe>=0.10.33
+opencv-python>=4.13
+numpy>=2.0
+
+# Optional: iPhone TrueDepth streaming over USB (Stage 2 only).
+# Windows install needs CMake + Visual Studio Build Tools + iTunes (for the
+# Apple USB drivers). Not on the critical path -- see README.
+# record3d>=1.4.1

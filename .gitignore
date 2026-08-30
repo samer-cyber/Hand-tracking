@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+captures/
+config/calib/*.json
+config/calib/*.npz
+models/*.task

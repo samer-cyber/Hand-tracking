@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import argparse
 import glob
+import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,8 +38,13 @@ def run(cmd: list[str], check: bool = True, capture: bool = False) -> subprocess
                           capture_output=capture)
 
 
-def have_gh() -> bool:
-    return shutil.which("gh") is not None
+def gh_path() -> str | None:
+    """Full path to the GitHub CLI.
+
+    Resolved rather than invoked by bare name, because on Windows the CLI may be
+    a .bat/.cmd shim and subprocess will not find those without the extension.
+    """
+    return shutil.which("gh")
 
 
 def main() -> int:
@@ -46,7 +53,8 @@ def main() -> int:
     ap.add_argument("--no-push", action="store_true", help="just fetch the latest build")
     args = ap.parse_args()
 
-    if not have_gh():
+    gh = gh_path()
+    if gh is None:
         print("The GitHub CLI is not installed, so this cannot watch or download the build.")
         print("\n  winget install GitHub.cli")
         print("  gh auth login\n")
@@ -66,21 +74,48 @@ def main() -> int:
             print("  nothing to commit")
         run(["git", "push"])
 
-    print("\nwaiting for the build (3-6 minutes)...")
-    # Give the run a moment to be created before asking about it.
-    run(["gh", "run", "list", "--workflow", WORKFLOW, "--limit", "1"], check=False)
-    result = run(["gh", "run", "watch", "--exit-status",
-                  "--workflow", WORKFLOW], check=False)
+    # Wait for the run belonging to THIS commit. GitHub takes a few seconds to
+    # create it, and simply grabbing the most recent run picks up the previous
+    # build -- which then reports success for code that was never compiled.
+    sha = run(["git", "rev-parse", "HEAD"], capture=True).stdout.strip()
+    print(f"\nlooking for the build of {sha[:8]}...")
+
+    run_id = None
+    for _ in range(30):
+        listing = subprocess.run(
+            [gh, "run", "list", "--workflow", WORKFLOW, "--limit", "15",
+             "--json", "databaseId,headSha"],
+            cwd=ROOT, text=True, capture_output=True)
+        if listing.returncode == 0:
+            try:
+                for entry in json.loads(listing.stdout):
+                    if entry.get("headSha", "").startswith(sha[:8]):
+                        run_id = str(entry["databaseId"])
+                        break
+            except json.JSONDecodeError:
+                pass
+        if run_id:
+            break
+        time.sleep(4)
+
+    if run_id is None:
+        print("No build was created for this commit. Check that the workflow is")
+        print("enabled, then look at:  gh run list --workflow ios.yml")
+        return 1
+
+    print(f"watching run {run_id} (3-6 minutes)...")
+    # `gh run watch` takes a run id positionally; there is no --workflow flag.
+    result = run([gh, "run", "watch", run_id, "--exit-status"], check=False)
 
     if result.returncode != 0:
         print("\nThe build FAILED. Show me the error with:")
-        print("  gh run view --log-failed")
+        print(f"  gh run view {run_id} --log-failed")
         return 1
 
     os.makedirs(OUT_DIR, exist_ok=True)
     for stale in glob.glob(os.path.join(OUT_DIR, "*.ipa")):
         os.remove(stale)
-    run(["gh", "run", "download", "--name", "HandBridge-unsigned-ipa",
+    run([gh, "run", "download", run_id, "--name", "HandBridge-unsigned-ipa",
          "--dir", OUT_DIR], check=False)
 
     # The artifact may arrive as a zip depending on gh's version.

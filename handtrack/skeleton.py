@@ -85,6 +85,18 @@ class HandModel:
         # 12cm; anything outside that is a detection failure, not a hand.
         if np.any(lengths < 0.005) or np.any(lengths > 0.12):
             return
+
+        # Per-bone limits are not enough on their own. A reconstruction whose
+        # depth is wrong stretches the whole hand while leaving each individual
+        # bone under the cap, so the model quietly learns an 18 cm palm, saves
+        # it, and then enforces that wrong size on every later frame -- including
+        # frames whose depth was fine. Check the overall dimensions too.
+        palm = np.linalg.norm(points[9] - points[0])       # wrist to middle knuckle
+        if not (0.055 < palm < 0.135):
+            return
+        span = np.linalg.norm(points.max(0) - points.min(0))
+        if not (0.08 < span < 0.32):
+            return
         self._bone_samples.append(lengths)
         # Store the palm centred so templates captured at different hand
         # orientations can be averaged meaningfully.

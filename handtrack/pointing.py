@@ -127,14 +127,27 @@ class AbsoluteRegion:
         self.lo: np.ndarray | None = None
         self.hi: np.ndarray | None = None
 
+    # A comfortable reach, and the bounds the region is held between. Too small
+    # and the cursor pins to the screen edges as soon as the hand leaves the
+    # box; too large and the mapping becomes so insensitive that the cursor
+    # barely moves. Both were observed.
+    MIN_SPAN = (0.14, 0.10, 0.10)
+    MAX_SPAN = (0.42, 0.32, 0.35)
+
     def fit(self, samples: np.ndarray) -> bool:
         s = np.asarray(samples, dtype=np.float64).reshape(-1, 3)
         if len(s) < 4:
             return False
-        lo, hi = s.min(0), s.max(0)
-        span = np.maximum(hi - lo, 0.05)
-        self.lo = lo - span * self.margin
-        self.hi = hi + span * self.margin
+        # Percentiles rather than min/max: a single mis-tracked frame at arm's
+        # length would otherwise define the whole region and flatten sensitivity
+        # permanently.
+        lo = np.percentile(s, 5, axis=0)
+        hi = np.percentile(s, 95, axis=0)
+        centre = (lo + hi) / 2.0
+        span = np.clip((hi - lo) * (1 + 2 * self.margin),
+                       self.MIN_SPAN, self.MAX_SPAN)
+        self.lo = centre - span / 2.0
+        self.hi = centre + span / 2.0
         return True
 
     @property
@@ -160,7 +173,7 @@ class RelativePointer:
     distance, slow ones refine.
     """
 
-    def __init__(self, gain: float = 2600.0, accel: float = 1.6,
+    def __init__(self, gain: float = 5200.0, accel: float = 2.2,
                  screen: tuple[int, int] = (1920, 1080)):
         self.gain = float(gain)
         self.accel = float(accel)

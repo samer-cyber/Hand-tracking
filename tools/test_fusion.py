@@ -35,10 +35,28 @@ def rig_at_angle(angle_deg: float, distance: float, width=1280, height=720, hfov
 
 
 def make_hand(centre=np.array([0.0, 0.0, 0.0])):
-    rng = np.random.default_rng(7)
+    """A hand with real proportions: about a 9 cm palm and an 18 cm span.
+
+    Sized deliberately. The anatomical gates in HandModel reject implausible
+    geometry, so a toy skeleton built from arbitrary offsets is refused -- and a
+    test hand that the production code would throw away is testing nothing.
+    """
     pts = np.zeros((21, 3))
-    for c, p in BONES:
-        pts[c] = pts[p] + rng.normal(0, 1, 3) * 0.012 + np.array([0.018, 0.016, 0.004])
+    spread = 0.085                      # knuckle to knuckle across the palm
+    palm = 0.090                        # wrist to middle knuckle
+    lengths = [(0.032, 0.028, 0.024),   # thumb
+               (0.040, 0.026, 0.020),   # index
+               (0.044, 0.028, 0.021),   # middle
+               (0.040, 0.026, 0.020),   # ring
+               (0.032, 0.021, 0.018)]   # little
+    for f in range(5):
+        x = -spread / 2 + spread * f / 4
+        base = np.array([x, palm * (0.72 if f == 0 else 1.0), 0.004 * f])
+        pts[1 + f * 4] = base
+        run = base
+        for j, seg in enumerate(lengths[f]):
+            run = run + np.array([x * 0.18, seg, 0.002])
+            pts[2 + f * 4 + j] = run
     return pts - pts.mean(0) + centre
 
 

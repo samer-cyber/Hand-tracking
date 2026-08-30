@@ -30,6 +30,9 @@ final class CaptureEngine: NSObject, ObservableObject {
     /// streams can run at different rates, and knowing which is which explains
     /// why depth appears on only some frames.
     @Published var formatSummary: String = "-"
+    /// Whether depth is being mapped through real intrinsics rather than by
+    /// assuming the two streams share a field of view.
+    @Published var depthAligned: Bool = false
 
     private let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -345,6 +348,7 @@ extension CaptureEngine: AVCaptureDataOutputSynchronizerDelegate {
         }
 
         let depths = depthData.map { sampleDepth($0, at: pixels,
+                                                 colorIntrinsics: intrinsics,
                                                  imageWidth: width, imageHeight: height) }
 
         let covered = depths?.filter { $0.isFinite }.count ?? 0
@@ -366,7 +370,21 @@ extension CaptureEngine: AVCaptureDataOutputSynchronizerDelegate {
     /// whatever is metres behind it. Averaging those produces a confident value
     /// corresponding to nothing; the median stays on whichever surface fills
     /// most of the patch.
+    ///
+    /// Landmarks are mapped into the depth map through BOTH cameras' intrinsics
+    /// rather than by scaling image coordinates. Scaling assumes the colour and
+    /// depth streams share a field of view, and they generally do not -- the
+    /// colour stream here is 16:9 while the depth stream is 4:3. Under that
+    /// assumption every landmark still receives a depth, so nothing looks
+    /// broken, but each is read from the wrong place. The visible symptom was a
+    /// hand whose measured palm swung between 9 cm and 18 cm depending on
+    /// whether depth had arrived, which then corrupted the learned hand model
+    /// and every mode downstream of it.
+    ///
+    /// Un-projecting through the colour intrinsics and re-projecting through
+    /// the depth intrinsics is correct for any pair of fields of view.
     private func sampleDepth(_ depthData: AVDepthData, at pixels: [SIMD2<Float>],
+                             colorIntrinsics: SIMD4<Float>,
                              imageWidth: Int, imageHeight: Int) -> [Float] {
         let converted = depthData.depthDataType == kCVPixelFormatType_DepthFloat32
             ? depthData
@@ -383,14 +401,41 @@ extension CaptureEngine: AVCaptureDataOutputSynchronizerDelegate {
             return [Float](repeating: .nan, count: pixels.count)
         }
 
+        // Depth-camera intrinsics, rescaled from the dimensions Apple reports
+        // them against to the actual size of this depth map.
+        var dfx: Float = 0, dfy: Float = 0, dcx: Float = 0, dcy: Float = 0
+        var haveDepthIntrinsics = false
+        if let calib = converted.cameraCalibrationData {
+            let ref = calib.intrinsicMatrixReferenceDimensions
+            let k = calib.intrinsicMatrix
+            let rx = Float(dw) / Float(ref.width)
+            let ry = Float(dh) / Float(ref.height)
+            dfx = k.columns.0.x * rx
+            dfy = k.columns.1.y * ry
+            dcx = k.columns.2.x * rx
+            dcy = k.columns.2.y * ry
+            haveDepthIntrinsics = dfx > 1 && dfy > 1
+        }
+        DispatchQueue.main.async { self.depthAligned = haveDepthIntrinsics }
+
+        // Fallback only when the depth stream reports no calibration at all.
         let sx = Float(dw) / Float(imageWidth)
         let sy = Float(dh) / Float(imageHeight)
         let radius = 2
         var out = [Float](repeating: .nan, count: pixels.count)
 
         for i in 0..<pixels.count {
-            let cx = Int((pixels[i].x * sx).rounded())
-            let cy = Int((pixels[i].y * sy).rounded())
+            var mx = pixels[i].x * sx
+            var my = pixels[i].y * sy
+            if haveDepthIntrinsics {
+                // Colour pixel -> normalised ray -> depth pixel.
+                let nx = (pixels[i].x - colorIntrinsics.z) / colorIntrinsics.x
+                let ny = (pixels[i].y - colorIntrinsics.w) / colorIntrinsics.y
+                mx = nx * dfx + dcx
+                my = ny * dfy + dcy
+            }
+            let cx = Int(mx.rounded())
+            let cy = Int(my.rounded())
             var samples: [Float] = []
             samples.reserveCapacity((2 * radius + 1) * (2 * radius + 1))
             for dy in -radius...radius {

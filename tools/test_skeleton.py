@@ -5,9 +5,9 @@ from handtrack.skeleton import HandModel
 from handtrack.detect import BONES
 
 rng = np.random.default_rng(0)
-base = np.zeros((21, 3))
-for c, p in BONES:
-    base[c] = base[p] + rng.normal(0, 1, 3) * 0.01 + np.array([0.02, 0.02, 0.002])
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from test_fusion import make_hand
+base = make_hand()
 
 m = HandModel(calibration_frames=30)
 for _ in range(40):

@@ -57,6 +57,7 @@ struct ContentView: View {
                     sender.isConnected ? .green : .secondary)
                 row("camera", engine.status, .secondary)
                 row("rate", String(format: "%.0f fps", engine.framesPerSecond), .secondary)
+                row("format", engine.formatSummary, .secondary)
                 row("hand", engine.handDetected ? "tracking" : "none",
                     engine.handDetected ? .green : .orange)
                 row("depth", "\(engine.depthCoverage) / 21 landmarks",

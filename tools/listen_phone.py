@@ -43,7 +43,13 @@ def main() -> int:
     print("packets arriving\n")
     interrupt = Interrupt().install()
 
-    transit, coverage, rates = [], [], []
+    transit, rates = [], []
+    # Depth is only meaningful on frames where a hand was actually found.
+    # Averaging over every frame buries the real number under the idle ones and
+    # produces advice ("move closer") that has nothing to do with the problem.
+    coverage_with_hand: list[int] = []
+    hand_frames = 0
+    total_frames = 0
     last_index = -1
     started = time.time()
     printed = 0
@@ -60,8 +66,11 @@ def main() -> int:
         t = src.transit_ms(frame)
         if np.isfinite(t):
             transit.append(t)
-        coverage.append(int(np.isfinite(frame.depth).sum()))
         rates.append(src.measured_fps)
+        total_frames += 1
+        if frame.has_hand:
+            hand_frames += 1
+            coverage_with_hand.append(int(np.isfinite(frame.depth).sum()))
 
         printed += 1
         if printed % 15 == 0:
@@ -84,12 +93,24 @@ def main() -> int:
         print(f"transit      {np.median(transit):.1f} ms median, "
               f"{np.percentile(transit, 95):.1f} ms p95")
         print("             (phone capture -> arrival here; excludes sensor/exposure)")
-    if coverage:
-        c = np.array(coverage)
-        print(f"depth        {c.mean():.1f}/21 landmarks average, "
-              f"{100.0 * (c >= 12).mean():.0f}% of frames had 12 or more")
-        if c.mean() < 6:
-            print("             LOW -- move your hand closer, 30-60 cm from the phone")
+    if total_frames:
+        print(f"hand seen    {100.0 * hand_frames / total_frames:.0f}% of frames "
+              f"({hand_frames}/{total_frames})")
+    if coverage_with_hand:
+        c = np.array(coverage_with_hand)
+        got = c >= 12
+        print(f"depth        counted only over frames WITH a hand:")
+        print(f"             {100.0 * got.mean():.0f}% of those carried depth, "
+              f"{c[got].mean() if got.any() else 0:.0f}/21 landmarks when present")
+        # Video and depth can run at different sensor rates, so depth legitimately
+        # lands on a fraction of frames. That is a rate difference, not a fault,
+        # and it looks alarming on a live readout without this note.
+        if 0.30 <= got.mean() <= 0.70:
+            print("             depth arrives on roughly half the frames, which is the")
+            print("             video/depth rate difference, not a failure. The fusion")
+            print("             filter treats depth as optional and handles it.")
+        elif got.mean() < 0.15:
+            print("             LOW -- move your hand to 30-60 cm from the phone")
     if src.dropped > src.packets * 0.1:
         print("packet loss is high; prefer 5 GHz Wi-Fi, or move closer to the router")
 

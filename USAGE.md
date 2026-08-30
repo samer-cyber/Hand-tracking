@@ -153,8 +153,40 @@ does not resolve.
 
 **Reference points:** Quest 3 hand tracking measures ~70 ms, Vision Pro ~128 ms.
 Vision Pro feels good despite being the slower of the two, which says most of
-"feel" comes from prediction and interaction design rather than raw latency. Our
-pipeline stage is ~33 ms plus camera-internal delay we can't see.
+"feel" comes from prediction and interaction design rather than raw latency.
+
+---
+
+## Measured on this rig
+
+The phone turned out to be far better than assumed, and two design decisions
+were made on guesses that measurement overturned.
+
+| | measured | I had assumed |
+|---|---|---|
+| phone frame rate | **65 fps** | 30 fps |
+| phone transit (capture -> PC) | **12.8 ms** median, 20.8 p95 | ~120 ms feared |
+| packet loss | **0** in 1910 packets | unknown |
+| depth when present | **21/21** landmarks | 12+ hoped |
+| laptop frame rate | 30 fps (hard cap) | 30 fps |
+
+Two consequences:
+
+**The phone is the primary camera now, not the helper.** It runs at double the
+laptop's rate with 13 ms of transit. The laptop's 30 fps cap is the slower half
+of the rig, which inverts the original plan.
+
+**Published warnings about Apple's Vision hand pose being slow (~120 ms) did not
+hold here.** On-device detection plus Wi-Fi round trip totals ~13 ms, so the
+on-phone architecture is vindicated. There is no need to fall back to streaming
+frames.
+
+**Depth arrives on roughly half the frames, and that is correct.** Video runs at
+65 Hz while the TrueDepth stream runs near 30 Hz, so alternate frames have no
+depth partner. Video is deliberately *not* held back to the depth rate: doubling
+the landmark rate halves sampling latency, which is the weakest axis of the
+system, while depth is an optional measurement to the fusion filter and loses
+very little by arriving half as often.
 
 ---
 

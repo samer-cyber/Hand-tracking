@@ -25,6 +25,10 @@ final class CaptureEngine: NSObject, ObservableObject {
     @Published var framesPerSecond: Double = 0
     @Published var handDetected: Bool = false
     @Published var depthCoverage: Int = 0
+    /// What the camera actually negotiated. Worth surfacing: the video and depth
+    /// streams can run at different rates, and knowing which is which explains
+    /// why depth appears on only some frames.
+    @Published var formatSummary: String = "-"
 
     private let session = AVCaptureSession()
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -152,19 +156,51 @@ final class CaptureEngine: NSObject, ObservableObject {
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
                 device.activeFormat = format
-                // Selecting the video format does NOT select a depth format.
-                // Leave it unset and the depth output stays silent, so pick the
-                // highest-resolution depth stream the chosen format allows.
-                if let depthFormat = format.supportedDepthDataFormats.max(by: { a, b in
-                    CMVideoFormatDescriptionGetDimensions(a.formatDescription).width
+
+                // Selecting the video format does NOT select a depth format, and
+                // the choice matters more than it looks. Ranking depth formats by
+                // resolution picks one that runs at half the video rate, so every
+                // other frame arrives with no depth partner -- measured as depth
+                // alternating 21/21, 0/21, 21/21 on consecutive frames.
+                //
+                // Rank by frame rate first, resolution second, for the same
+                // reason as the video format: a depth sample that exists is worth
+                // more than a sharper one that is missing.
+                let depthFormat = format.supportedDepthDataFormats.max { a, b in
+                    let ra = a.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+                    let rb = b.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+                    if ra != rb { return ra < rb }
+                    return CMVideoFormatDescriptionGetDimensions(a.formatDescription).width
                         < CMVideoFormatDescriptionGetDimensions(b.formatDescription).width
-                }) {
+                }
+                if let depthFormat {
                     device.activeDepthDataFormat = depthFormat
                 }
-                let maxRate = format.videoSupportedFrameRateRanges
+
+                // Video runs at its own maximum rather than being held back to
+                // the depth rate. If depth tops out at 30 Hz while video can do
+                // 60, capping would halve the landmark rate to make depth appear
+                // on every frame -- which trades a real latency improvement for
+                // a cosmetic one.
+                //
+                // Landmarks arriving twice as often directly halves sampling
+                // latency, and latency is the weakest axis of this whole system.
+                // Depth is an optional measurement to the fusion filter, so
+                // arriving on alternate frames costs it very little.
+                let videoRate = format.videoSupportedFrameRateRanges
                     .map(\.maxFrameRate).max() ?? 30
-                let scale = CMTimeScale(max(1, Int32(maxRate.rounded())))
+                let depthRate = depthFormat?.videoSupportedFrameRateRanges
+                    .map(\.maxFrameRate).max() ?? videoRate
+                let scale = CMTimeScale(max(1, Int32(videoRate.rounded())))
                 device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: scale)
+
+                let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+                let dsize = depthFormat
+                    .map { CMVideoFormatDescriptionGetDimensions($0.formatDescription) }
+                    .map { "\($0.width)x\($0.height)" } ?? "none"
+                let summary = "\(dims.width)x\(dims.height)@\(Int(videoRate))  "
+                    + "depth \(dsize)@\(Int(depthRate))"
+                DispatchQueue.main.async { self.formatSummary = summary }
             } catch {
                 // Not fatal: the session preset already provides a usable format,
                 // just possibly a slower one.

@@ -1,162 +1,130 @@
-"""Check the whole chain and report exactly what is blocking stereo tracking.
+"""Check the path from this PC to the phone, one link at a time.
 
-Run this first whenever something does not work. It walks the dependency chain
-in order -- cameras respond, both see your hand at the same time, a rig
-calibration exists and is plausible -- and stops at the first thing that is
-actually broken, rather than leaving you to infer it from a crash.
-
-    python tools/doctor.py --laptop 0 --phone 2
+Run when something is not connecting. Each check reports the specific fix rather
+than a generic failure, because the four things that go wrong here -- no Apple
+USB service, no cable, phone locked, app not started -- all present identically
+as "it does not connect".
 """
+
 from __future__ import annotations
 
-import argparse
-import json
-import os
+import socket
 import sys
 import time
 
-import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from handtrack.capture import CameraOpenError
-from handtrack.detect import HandDetector
-from handtrack.runtime import Interrupt
-from handtrack.sources import describe_spec, open_source
-
-OK, BAD, WARN = "  [ok]   ", " [FAIL]  ", " [warn]  "
+def _ok(text: str) -> None:
+    print(f"  [ ok ] {text}")
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--laptop", default="0")
-    ap.add_argument("--phone", default="2")
-    ap.add_argument("--rig", default="config/calib/rig.json")
-    ap.add_argument("--seconds", type=float, default=8.0)
-    ap.add_argument("--model", default="models/hand_landmarker.task")
-    args = ap.parse_args()
+def _bad(text: str, fix: str = "") -> None:
+    print(f"  [FAIL] {text}")
+    if fix:
+        print(f"         -> {fix}")
 
-    interrupt = Interrupt().install()
-    print("Hand-tracking doctor\n" + "=" * 56)
 
-    # 1 -- model file
-    if not os.path.exists(args.model):
-        print(BAD + f"missing model file {args.model}")
-        return 1
-    print(OK + "hand landmark model present")
+def main(port: int = 9871) -> int:
+    print("HandPilot doctor\n")
+    failures = 0
 
-    # 2 -- cameras open
-    sources = {}
-    for label, spec in (("laptop", args.laptop), ("phone", args.phone)):
-        if str(spec).lower() == "none":
-            continue
-        try:
-            sources[label] = open_source(spec, 1280, 720, name=label)
-            s = sources[label]
-            print(OK + f"{label}: {describe_spec(spec)} -> {s.width}x{s.height}")
-        except CameraOpenError as exc:
-            print(BAD + f"{label}: {describe_spec(spec)} did not respond")
-            print("         " + str(exc).splitlines()[0])
-            if label == "phone":
-                print("         The phone webcam app is almost certainly not streaming.")
-                print("         Open Iriun on BOTH the phone and the PC, confirm you can")
-                print("         see live video in the PC app, then re-run this.")
-        except Exception as exc:
-            print(BAD + f"{label}: {exc}")
-
-    if not sources:
-        print("\nNo cameras available -- nothing else can be checked.")
-        return 1
-
-    # 3 -- do they deliver frames, and can each see a hand?
-    print(f"\nWatching for {args.seconds:.0f}s -- hold ONE hand where BOTH cameras see it.\n")
-    detectors = {k: HandDetector(args.model, num_hands=1) for k in sources}
-    seen = {k: 0 for k in sources}
-    frames = {k: 0 for k in sources}
-    last = {k: -1 for k in sources}
-    both = 0
-    total = 0
-    t_end = time.time() + args.seconds
-
-    while time.time() < t_end and not interrupt:
-        got = {}
-        for k, src in sources.items():
-            f = src.read()
-            if f is None or f.index == last[k]:
-                continue
-            last[k] = f.index
-            frames[k] += 1
-            hands = detectors[k].detect(f.image, f.timestamp, f.index)
-            got[k] = bool(hands)
-            if hands:
-                seen[k] += 1
-        if got:
-            total += 1
-            if len(got) == len(sources) and all(got.values()):
-                both += 1
-
-    for k in sources:
-        rate = 100.0 * seen[k] / max(frames[k], 1)
-        fps = sources[k].measured_fps
-        line = f"{k}: {frames[k]} frames ({fps:.1f} fps), hand seen in {rate:.0f}%"
-        if frames[k] == 0:
-            print(BAD + line + "  -- delivering NO frames")
-        elif rate < 20:
-            print(WARN + line + "  -- rarely sees your hand")
-        else:
-            print(OK + line)
-
-    if len(sources) == 2:
-        pct = 100.0 * both / max(total, 1)
-        if pct < 15:
-            print(BAD + f"both cameras saw the hand together in only {pct:.0f}% of frames")
-            print("         Stereo needs BOTH views simultaneously. Aim the phone at the")
-            print("         same space your hand occupies in front of the laptop, and")
-            print("         check the overlap before calibrating.")
-        else:
-            print(OK + f"both cameras saw the hand together in {pct:.0f}% of frames")
-
-    # 4 -- rig calibration
-    print()
-    if not os.path.exists(args.rig):
-        print(WARN + f"no rig calibration at {args.rig}")
-        print("         Without it the phone CANNOT contribute and everything falls")
-        print("         back to laptop-only mono tracking. This is the usual reason")
-        print("         the phone appears to be ignored. Fix with:")
-        print(f"           python tools/calibrate_rig_hand.py --cam-a {args.laptop} --cam-b {args.phone}")
+    print("Python")
+    if sys.version_info < (3, 10):
+        _bad(f"Python {sys.version.split()[0]} is too old",
+             "install Python 3.10 or newer from python.org")
+        failures += 1
     else:
-        try:
-            meta = json.load(open(args.rig))
-            ang, base = meta.get("angle_deg", float("nan")), meta.get("baseline_m", float("nan"))
-            print(OK + f"rig calibration present: {ang:.1f} deg, baseline {base*100:.1f} cm "
-                       f"({meta.get('method', 'checkerboard')})")
-            if not (0.02 < base < 1.5):
-                print(WARN + "  baseline is implausible -- recalibrate")
-            if ang < 15:
-                print(WARN + "  cameras nearly parallel -- depth will be weak; angle the phone more")
-        except Exception as exc:
-            print(BAD + f"rig calibration unreadable: {exc}")
+        _ok(f"Python {sys.version.split()[0]}")
+    try:
+        import tkinter  # noqa: F401
+        _ok("tkinter present")
+    except ImportError:
+        _bad("tkinter missing",
+             "reinstall Python from python.org with the tcl/tk option ticked")
+        failures += 1
 
-    if os.path.exists("config/calib/hand_model.npz"):
-        print(OK + "saved hand model present")
+    print("\nApple USB service")
+    from handpilot import usbmux
+    try:
+        devices = usbmux.list_devices()
+        _ok("usbmuxd is reachable on 127.0.0.1:27015")
+    except usbmux.UsbmuxUnavailable as exc:
+        _bad(str(exc))
+        return failures + 1
+    except Exception as exc:                                  # noqa: BLE001
+        _bad(str(exc))
+        return failures + 1
+
+    print("\nDevices")
+    if not devices:
+        _bad("no iPhone attached",
+             "plug it in with a data cable, unlock it, and tap Trust")
+        return failures + 1
+    for device in devices:
+        kind = "USB" if device["usb"] else "Wi-Fi sync (no good for this)"
+        _ok(f"{device['serial']}  via {kind}")
+    if not any(d["usb"] for d in devices):
+        _bad("nothing over the cable",
+             "some cables are charge-only; try the one that came with the phone")
+        return failures + 1
+
+    print(f"\nHandPilot app on port {port}")
+    try:
+        sock, device = usbmux.connect_first(port)
+    except Exception as exc:                                  # noqa: BLE001
+        _bad(str(exc),
+             "open HandPilot on the phone and press Start, and check the port "
+             "there matches")
+        return failures + 1
+
+    _ok(f"connected to {device['serial']}")
+    sock.settimeout(3.0)
+    start = time.perf_counter()
+    try:
+        data = sock.recv(65536)
+    except socket.timeout:
+        _bad("connected, but the phone is sending nothing",
+             "press Start in the app; the camera row should read 'streaming'")
+        sock.close()
+        return failures + 1
+    finally:
+        pass
+
+    elapsed = (time.perf_counter() - start) * 1000
+    if data[:4] == b"HPU1":
+        _ok(f"receiving data ({len(data)} bytes, first packet after {elapsed:.0f} ms)")
     else:
-        print(WARN + "no saved hand model (it will be learned at runtime; press 's' to save)")
+        _bad(f"unexpected data on the wire: {data[:16]!r}",
+             "something else is listening on that port inside the phone")
+        failures += 1
 
-    for s in sources.values():
-        s.release()
-    for d in detectors.values():
-        d.close()
-
-    print("\n" + "=" * 56)
-    ready = len(sources) == 2 and os.path.exists(args.rig)
-    if ready:
-        print("Ready for stereo. Run:")
-        print(f"  python run_fusion.py --laptop {args.laptop} --phone {args.phone}")
-        print("  (the HUD 'mode' line should read 'stereo')")
+    print("\nThroughput")
+    count = 0
+    deadline = time.perf_counter() + 1.0
+    try:
+        while time.perf_counter() < deadline:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            count += chunk.count(b"HPU1")
+    except socket.timeout:
+        pass
+    sock.close()
+    if count >= 90:
+        _ok(f"{count} messages/second")
+    elif count > 0:
+        _bad(f"only {count} messages/second",
+             "expect 120 or so; check the frame rate and shutter on the Camera tab, "
+             "and whether the room is bright enough for the shutter you chose")
+        failures += 1
     else:
-        print("Not ready for stereo yet -- fix the items marked FAIL/warn above.")
-    return 0
+        _bad("no messages", "press Start in the phone app")
+        failures += 1
+
+    print("\nDone." if not failures else f"\n{failures} problem(s) found.")
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     raise SystemExit(main())

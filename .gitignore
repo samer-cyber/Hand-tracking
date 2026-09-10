@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
-captures/
-config/calib/*.json
-config/calib/*.npz
-models/*.task
+config.json
+ios/HandPilot/*.xcodeproj/
+ios/HandPilot/build/
+ios/HandPilot/out/
+ios/HandPilot/HandPilot/Info.plist

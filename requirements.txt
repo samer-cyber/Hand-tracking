@@ -1,9 +1,9 @@
-# Core pipeline. Already present on this machine's Python 3.14 install.
-mediapipe>=0.10.33
-opencv-python>=4.13
-numpy>=2.0
-
-# Optional: iPhone TrueDepth streaming over USB (Stage 2 only).
-# Windows install needs CMake + Visual Studio Build Tools + iTunes (for the
-# Apple USB drivers). Not on the critical path -- see README.
-# record3d>=1.4.1
+# Nothing to install.
+#
+# HandPilot deliberately uses only the standard library: tkinter for the window,
+# ctypes for Windows input, plistlib and socket for Apple's USB multiplexer.
+# A dependency would mean a pip step between "I want to use this" and using it,
+# and none of the candidates would have earned it.
+#
+# Requires Python 3.10 or newer (for `X | None` annotations), with tkinter --
+# which the python.org installer includes by default.

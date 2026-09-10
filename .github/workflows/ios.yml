@@ -1,10 +1,10 @@
-name: Build HandBridge (unsigned IPA)
+name: Build HandPilot (unsigned IPA)
 
 # Builds the iPhone app on GitHub's macOS runners, so no Mac is needed locally.
-# The result is an UNSIGNED .ipa: sideload it with AltStore or Sideloadly, which
-# signs it with your own free Apple ID on your machine.
+# The result is an UNSIGNED .ipa: sideload it with Sideloadly or AltStore, which
+# signs it with your own free Apple ID on your own machine.
 #
-# Run it from the Actions tab ("Run workflow"), or on every push to ios/.
+# Run it from the Actions tab ("Run workflow"), or on any push touching ios/.
 
 on:
   workflow_dispatch:
@@ -28,18 +28,18 @@ jobs:
         run: brew install xcodegen
 
       - name: Generate Xcode project
-        working-directory: ios/HandBridge
+        working-directory: ios/HandPilot
         run: xcodegen generate
 
-      # Compile first without archiving. A plain build surfaces Swift errors
-      # with far clearer output than an archive failure does.
+      # Compile before archiving. A plain build surfaces Swift errors with far
+      # clearer output than an archive failure does.
       - name: Build
-        working-directory: ios/HandBridge
+        working-directory: ios/HandPilot
         run: |
           set -o pipefail
           xcodebuild \
-            -project HandBridge.xcodeproj \
-            -scheme HandBridge \
+            -project HandPilot.xcodeproj \
+            -scheme HandPilot \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
@@ -49,18 +49,18 @@ jobs:
             build
 
       - name: Package unsigned IPA
-        working-directory: ios/HandBridge
+        working-directory: ios/HandPilot
         run: |
           APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
           if [ -z "$APP" ]; then echo "no .app produced"; exit 1; fi
           echo "packaging $APP"
           mkdir -p out/Payload
           cp -R "$APP" out/Payload/
-          cd out && zip -qry HandBridge-unsigned.ipa Payload
-          ls -lh HandBridge-unsigned.ipa
+          cd out && zip -qry HandPilot-unsigned.ipa Payload
+          ls -lh HandPilot-unsigned.ipa
 
       - uses: actions/upload-artifact@v4
         with:
-          name: HandBridge-unsigned-ipa
-          path: ios/HandBridge/out/HandBridge-unsigned.ipa
+          name: HandPilot-unsigned-ipa
+          path: ios/HandPilot/out/HandPilot-unsigned.ipa
           retention-days: 30

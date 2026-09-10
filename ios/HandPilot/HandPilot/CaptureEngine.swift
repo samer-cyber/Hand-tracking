@@ -292,8 +292,8 @@ final class CaptureEngine: NSObject, ObservableObject {
             if dev.isAutoFocusRangeRestrictionSupported { dev.autoFocusRangeRestriction = .near }
             if dev.isFocusModeSupported(.continuousAutoFocus) { dev.focusMode = .continuousAutoFocus }
         } else if dev.isFocusModeSupported(.locked) {
-            dev.setFocusModeLockedWithLensPosition(min(max(settings.lensPosition, 0), 1),
-                                                   completionHandler: nil)
+            dev.setFocusModeLocked(lensPosition: min(max(settings.lensPosition, 0), 1),
+                                   completionHandler: nil)
         }
     }
 
@@ -530,9 +530,13 @@ extension CaptureEngine: AVCaptureVideoDataOutputSampleBufferDelegate {
             }
             // One dictionary for all 21 joints. `recognizedPoint(_:)` rebuilds
             // group lookups on every call, which is measurable at 120 Hz.
+            //
+            // The dictionary is keyed by JointName itself, not by the underlying
+            // VNRecognizedPointKey that JointName wraps -- the hand-pose
+            // observation specialises the generic point API.
             if let all = try? observation.recognizedPoints(.all) {
                 for (i, joint) in Self.joints.enumerated() {
-                    guard let p = all[joint.rawValue], p.confidence > 0 else { continue }
+                    guard let p = all[joint], p.confidence > 0 else { continue }
                     // Vision's origin is bottom-left; everyone else's is top-left.
                     points[i] = SIMD3<Float>(Float(p.location.x),
                                              Float(1.0 - p.location.y),

@@ -1,9 +1,8 @@
 # Nothing to install.
 #
-# HandPilot deliberately uses only the standard library: tkinter for the window,
-# ctypes for Windows input, plistlib and socket for Apple's USB multiplexer.
-# A dependency would mean a pip step between "I want to use this" and using it,
-# and none of the candidates would have earned it.
+# HandPilot's desktop side uses only the Python standard library: http.server
+# for the window, ctypes for Windows input, plistlib and socket for Apple's USB
+# multiplexer. A dependency would mean a pip step between "I want to try this"
+# and trying it, and none of the candidates would have earned it.
 #
-# Requires Python 3.10 or newer (for `X | None` annotations), with tkinter --
-# which the python.org installer includes by default.
+# Requires Python 3.10 or newer.

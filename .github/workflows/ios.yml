@@ -1,17 +1,23 @@
-name: Build HandPilot (unsigned IPA)
+name: Build iPhone app (unsigned IPA)
 
-# Builds the iPhone app on GitHub's macOS runners, so no Mac is needed locally.
-# The result is an UNSIGNED .ipa: sideload it with Sideloadly or AltStore, which
-# signs it with your own free Apple ID on your own machine.
+# Builds the iPhone app on GitHub's macOS runners, so no Mac is needed. The
+# result is an UNSIGNED .ipa: sideload it with Sideloadly or AltStore, which sign
+# it with your own Apple ID on your own computer. See docs/ios-build.md.
 #
-# Run it from the Actions tab ("Run workflow"), or on any push touching ios/.
+# Runs from the Actions tab ("Run workflow"), on pushes that touch ios/, and on
+# version tags -- a tag also attaches the .ipa to that GitHub release.
 
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - 'ios/**'
       - '.github/workflows/ios.yml'
+    tags: ['v*']
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -31,7 +37,7 @@ jobs:
         working-directory: ios/HandPilot
         run: xcodegen generate
 
-      # Compile before archiving. A plain build surfaces Swift errors with far
+      # Compile before packaging. A plain build surfaces Swift errors with far
       # clearer output than an archive failure does.
       - name: Build
         working-directory: ios/HandPilot
@@ -42,6 +48,7 @@ jobs:
             -scheme HandPilot \
             -configuration Release \
             -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -64,3 +71,9 @@ jobs:
           name: HandPilot-unsigned-ipa
           path: ios/HandPilot/out/HandPilot-unsigned.ipa
           retention-days: 30
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ios/HandPilot/out/HandPilot-unsigned.ipa

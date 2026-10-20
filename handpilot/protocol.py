@@ -26,6 +26,19 @@ _POINTS = struct.Struct("<" + "fff" * LANDMARKS)
 
 ORIENTATION_NAMES = {0: "portrait", 1: "landscape left", 2: "landscape right", 3: "upside down"}
 
+#: The 21 landmarks, in wire order -- the same order MediaPipe uses, so code
+#: written against either skeleton works on both.
+LANDMARK_NAMES = (
+    "wrist",
+    "thumb_cmc", "thumb_mcp", "thumb_ip", "thumb_tip",
+    "index_mcp", "index_pip", "index_dip", "index_tip",
+    "middle_mcp", "middle_pip", "middle_dip", "middle_tip",
+    "ring_mcp", "ring_pip", "ring_dip", "ring_tip",
+    "little_mcp", "little_pip", "little_dip", "little_tip",
+)
+LANDMARK_INDEX = {name: i for i, name in enumerate(LANDMARK_NAMES)}
+_HANDEDNESS = {1: "left", 2: "right"}
+
 
 @dataclass(slots=True)
 class Frame:
@@ -58,6 +71,35 @@ class Frame:
     @property
     def aspect(self) -> float:
         return (self.width / self.height) if self.height else 16 / 9
+
+    @property
+    def handedness(self) -> str:
+        """"left", "right" or "unknown", as Apple Vision reports it."""
+        return _HANDEDNESS.get(self.chirality, "unknown")
+
+    def landmark(self, key: int | str) -> tuple[float, float, float]:
+        """One landmark as (x, y, confidence), by index or by name such as
+        ``"index_tip"``. x and y are 0..1 with the origin at the top left."""
+        i = LANDMARK_INDEX[key] if isinstance(key, str) else int(key)
+        return self.x[i], self.y[i], self.conf[i]
+
+    def to_dict(self, digits: int = 5) -> dict:
+        """The frame as plain JSON-ready data -- the format every raw-data
+        output uses, documented in docs/data.md."""
+        if self.hand and len(self.x) == LANDMARKS:
+            points = [[round(x, digits), round(y, digits), round(c, 3)]
+                      for x, y, c in zip(self.x, self.y, self.conf)]
+        else:
+            points = []
+        return {
+            "seq": self.seq,
+            "t": round(self.t_capture, 6),
+            "hand": self.hand,
+            "handedness": self.handedness if self.hand else None,
+            "width": self.width,
+            "height": self.height,
+            "landmarks": points,
+        }
 
 
 def decode_frame(payload: bytes, t_recv: float) -> Frame:

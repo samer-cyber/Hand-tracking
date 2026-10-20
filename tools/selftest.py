@@ -377,10 +377,13 @@ def test_link() -> None:
 
 def test_config_and_actions() -> None:
     print("\nConfig and actions")
+    import json
+    import tempfile
+
     from handpilot import actions, config
 
     cfg = config.load(path="does-not-exist.json")
-    check("defaults load", cfg["camera"]["fps"] == 120)
+    check("defaults load", cfg["pointer"]["anchor"] == "knuckles" and cfg["version"] == 2)
     check("every gesture has a binding",
           all(gid in cfg["gestures"]["bindings"] for gid in gestures.GESTURE_IDS),
           str(set(gestures.GESTURE_IDS) - set(cfg["gestures"]["bindings"])))
@@ -393,6 +396,260 @@ def test_config_and_actions() -> None:
     check("there are plenty of actions", len(actions.ACTIONS) > 50,
           f"{len(actions.ACTIONS)}")
 
+    # A file from the Tkinter version: its inverted "Smoothing" slider and its
+    # lead-ahead must not survive the upgrade, and its region must be flagged.
+    old = {"camera": {"fps": 240}, "pointer": {"min_cutoff": 5.0, "beta": 0.097, "lead_ms": 12.8,
+                                               "pinch_on": 0.10, "pinch_off": 0.15,
+                                               "region": [0.2, 0.1, 0.9, 0.8]}}
+    with tempfile.TemporaryDirectory() as folder:
+        path = os.path.join(folder, "config.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(old, handle)
+        migrated = config.load(path)
+    p = migrated["pointer"]
+    check("old filter values are not carried over",
+          p["min_cutoff"] == config.DEFAULTS["pointer"]["min_cutoff"] and p["lead_ms"] == 0.0)
+    check("old click thresholds start from the new defaults",
+          p["pinch_on"] == config.DEFAULTS["pointer"]["pinch_on"])
+    check("old region kept but flagged for recalibration",
+          p["region"] == [0.2, 0.1, 0.9, 0.8] and p["needs_calibration"])
+    check("camera settings left to the phone", "camera" not in migrated)
+
+
+class _NoInput:
+    """Swap out everything in winput that would touch the real mouse."""
+
+    def __enter__(self):
+        from handpilot import winput
+        self.winput = winput
+        self.saved = {name: getattr(winput, name) for name in
+                      ("move_to", "button_down", "button_up", "wheel", "primary_screen",
+                       "virtual_screen")}
+        self.moves: list = []
+        self.buttons: list = []
+        winput.move_to = lambda x, y: self.moves.append((x, y))
+        winput.button_down = lambda b="left": self.buttons.append(("down", b))
+        winput.button_up = lambda b="left": self.buttons.append(("up", b))
+        winput.wheel = lambda clicks: None
+        winput.primary_screen = lambda: (0, 0, 1920, 1080)
+        winput.virtual_screen = lambda: (0, 0, 1920, 1080)
+        return self
+
+    def __exit__(self, *exc):
+        for name, fn in self.saved.items():
+            setattr(self.winput, name, fn)
+
+
+def _noisy(frame: Frame, rnd, tip_sigma: float, knuckle_sigma: float) -> Frame:
+    xs, ys = [], []
+    for i in range(21):
+        s = tip_sigma if i in handmodel.TIPS else knuckle_sigma
+        xs.append(frame.x[i] + rnd.gauss(0, s))
+        ys.append(frame.y[i] + rnd.gauss(0, s * ASPECT))
+    return Frame(hand=True, width=WIDTH, height=HEIGHT, x=xs, y=ys, conf=[0.9] * 21)
+
+
+def test_pointer_pipeline() -> None:
+    print("\nPointer pipeline (mouse output stubbed)")
+    import random
+
+    from handpilot.controller import PointerMode
+    from handpilot.filters import Rope, feel
+
+    steady = [feel(s) for s in (0.0, 0.5, 1.0)]
+    check("steadiness lowers the cutoff and beta, widens the dead zone",
+          steady[0][0] > steady[1][0] > steady[2][0] and steady[0][1] > steady[1][1] > steady[2][1]
+          and steady[0][2] < steady[1][2] < steady[2][2])
+
+    rope = Rope(2.0)
+    rope(100.0, 100.0)
+    held = {rope(100.0 + dx, 100.0) for dx in (0.5, -1.0, 1.5, -1.9)}
+    check("the dead zone ignores movement inside its radius", held == {(100.0, 100.0)})
+    x, _ = rope(110.0, 100.0)
+    check("the dead zone follows movement beyond it", abs(x - 108.0) < 1e-9, f"{x}")
+
+    open_hand = handmodel.build(make_hand((0.95,) * 5, thumb_dir=(-0.8, -0.5)))
+    pinched = handmodel.build(make_hand((0.5, 0.9, 0.9, 0.9, 0.9), pinch=0.05))
+    k_move = math.hypot(open_hand.knuckle_x - pinched.knuckle_x,
+                        open_hand.knuckle_y - pinched.knuckle_y)
+    p_move = math.hypot(open_hand.point_x - pinched.point_x, open_hand.point_y - pinched.point_y)
+    check("pinching barely moves the knuckle tracking point",
+          k_move < 0.25 * p_move, f"knuckles {k_move:.4f} vs pinch point {p_move:.4f}")
+
+    def still_moves(cfg: dict) -> int:
+        rnd = random.Random(7)
+        base = make_hand((0.5, 0.9, 0.9, 0.9, 0.9), thumb_dir=(-0.8, -0.5))
+        with _NoInput() as io:
+            p = PointerMode()
+            p.configure({"region": [0.2, 0.2, 0.8, 0.8], "click": False, **cfg})
+            for n in range(360):
+                p.update(handmodel.build(_noisy(base, rnd, 0.0012, 0.0004)), n / 120, n / 120)
+            settled = io.moves[120:]
+        return sum(1 for a, b in zip(settled, settled[1:]) if a != b)
+
+    old = still_moves({"anchor": "pinch", "custom_filter": True, "min_cutoff": 5.0,
+                       "beta": 0.097, "deadzone_px": 0.0, "lead_ms": 12.8})
+    new = still_moves({"anchor": "knuckles", "steadiness": 0.5})
+    check("a still hand holds the cursor still", new <= 2, f"moved {new} times in 2 s")
+    check("...where the old settings shook it", old > 100, f"moved {old} times")
+
+    # Frames that left the phone 8 ms apart but arrived in one USB read share a
+    # receive time. The filter must still see two samples.
+    with _NoInput() as io:
+        p = PointerMode()
+        p.configure({"region": [0.2, 0.2, 0.8, 0.8], "click": False,
+                     "custom_filter": True, "min_cutoff": 50.0, "beta": 0.0, "deadzone_px": 0.0})
+        for n, cx in enumerate((0.40, 0.40, 0.45, 0.50)):
+            p.update(handmodel.build(make_hand(centre=(cx, 0.5))), 1.0, 10.0 + n / 120)
+        xs = [x for x, _ in io.moves]
+    check("filtering runs on capture time, not arrival time",
+          len(set(xs[1:])) == len(xs[1:]), f"{xs}")
+
+
+def test_raw_data() -> None:
+    print("\nRaw data")
+    import json
+
+    from handpilot import HandStream, UdpForwarder
+
+    frame = make_hand()
+    frame.seq, frame.chirality = 5, 2
+    row = frame.to_dict()
+    check("frames serialise to the documented shape",
+          set(row) == {"seq", "t", "hand", "handedness", "width", "height", "landmarks"}
+          and len(row["landmarks"]) == 21 and row["handedness"] == "right")
+    check("landmarks can be read by name",
+          frame.landmark("index_tip")[:2] == (frame.x[8], frame.y[8]))
+
+    receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    receiver.bind(("127.0.0.1", 0))
+    receiver.settimeout(2.0)
+    forwarder = UdpForwarder(f"127.0.0.1:{receiver.getsockname()[1]}")
+    forwarder.send(frame)
+    try:
+        got = json.loads(receiver.recv(65536))
+    except (socket.timeout, ValueError):
+        got = {}
+    forwarder.close()
+    receiver.close()
+    check("UDP output delivers one JSON frame per datagram", got.get("seq") == 5)
+
+    port, stop = _fake_phone()
+    with HandStream(wifi="127.0.0.1", port=port) as hands:
+        first = hands.read(3.0)
+    stop.set()
+    check("HandStream yields frames without touching the mouse",
+          first is not None and first.hand and len(first.x) == 21)
+
+
+def _fake_phone(rate: float = 200.0):
+    """A socket that speaks the phone's side of the wire format."""
+    server = socket.socket()
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    stop = threading.Event()
+
+    def serve():
+        server.settimeout(5.0)
+        try:
+            conn, _ = server.accept()
+        except OSError:
+            return
+        hand = make_hand()
+        body = struct.pack("<" + "fff" * 21, *[v for i in range(21)
+                                               for v in (hand.x[i], hand.y[i], 0.9)])
+        seq = 0
+        while not stop.is_set():
+            seq += 1
+            now = time.time()
+            payload = struct.pack("<IddBBBBHHf", seq, now, now + 0.004, 1, 2, 2, 0,
+                                  WIDTH, HEIGHT, 4.0) + body
+            try:
+                conn.sendall(protocol.MAGIC + struct.pack("<BH", protocol.TYPE_FRAME,
+                                                          len(payload)) + payload)
+            except OSError:
+                break
+            time.sleep(1 / rate)
+        conn.close()
+        server.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    return server.getsockname()[1], stop
+
+
+def test_app_server() -> None:
+    print("\nApp window server")
+    import json
+    import tempfile
+    import urllib.error
+    import urllib.request
+
+    from handpilot import config
+    from handpilot.app import App
+    from handpilot.server import UIServer
+
+    port, stop = _fake_phone()
+    cfg = config.load("does-not-exist.json")
+    cfg.update(transport="wifi", wifi_host="127.0.0.1", port=port)
+    with tempfile.TemporaryDirectory() as folder, _NoInput():
+        app = App(cfg, config_path=os.path.join(folder, "config.json"))
+        server = UIServer(app, 0, quit_on_close=False)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        app.start(hotkeys=False)
+        base = f"http://127.0.0.1:{server.port}"
+
+        def call(path, body=None, token=True, host=None):
+            headers = {"Content-Type": "application/json"}
+            if token:
+                headers["X-HandPilot-Token"] = server.token
+            if host:
+                headers["Host"] = host
+            data = json.dumps(body).encode() if body is not None else None
+            request = urllib.request.Request(base + path, data=data, headers=headers)
+            try:
+                with urllib.request.urlopen(request, timeout=3) as reply:
+                    return reply.status, reply.read()
+            except urllib.error.HTTPError as err:
+                return err.code, err.read()
+
+        status, page = call("/", token=False)
+        check("serves the window", status == 200 and b"<canvas" in page)
+        check("rejects API calls without the session token", call("/api/state", token=False)[0] == 401)
+        check("rejects a foreign Host header (DNS rebinding)",
+              call("/api/state", host="evil.example:80")[0] == 403)
+        status, body = call("/api/state")
+        check("serves state with the token", status == 200
+              and json.loads(body)["config"]["pointer"]["anchor"] == "knuckles")
+
+        status, _ = call("/api/config", {"path": "pointer.steadiness", "value": 0.8})
+        check("applies a valid setting", status == 200
+              and app.controller.pointer.rope.radius > 2.0)
+        check("refuses unknown settings",
+              call("/api/config", {"path": "pointer.nope", "value": 1})[0] == 400)
+        check("refuses wrong types",
+              call("/api/config", {"path": "pointer.click", "value": "yes"})[0] == 400)
+        call("/api/config", {"path": "pointer.pinch_on", "value": 0.6})
+        check("keeps the click hysteresis band open",
+              cfg["pointer"]["pinch_off"] >= cfg["pointer"]["pinch_on"] + 0.04)
+
+        deadline = time.time() + 3
+        while time.time() < deadline and not app.controller.link.stats.connected:
+            time.sleep(0.05)
+        reply = urllib.request.urlopen(f"{base}/api/live?t={server.token}", timeout=3)
+        line = reply.readline()
+        reply.close()
+        snap = json.loads(line[len(b"data: "):]) if line.startswith(b"data: ") else {}
+        check("streams live snapshots", snap.get("conn", {}).get("connected") is True,
+              line[:80].decode(errors="replace"))
+        check("browser stream is off unless enabled", call("/stream", token=False)[0] == 403)
+
+        app.quit_event.set()
+        server.shutdown()
+        server.server_close()
+        app.shutdown()
+    stop.set()
+
 
 def test_pointer_math() -> None:
     print("\nPointer mapping")
@@ -404,8 +661,7 @@ def test_pointer_math() -> None:
     p.flip_y = False
     left, top, width, height = 0, 0, 1920, 1080
     try:
-        from handpilot import winput
-        left, top, width, height = winput.virtual_screen()
+        left, top, width, height = p.screen_rect()
     except OSError:
         pass
 
@@ -435,6 +691,9 @@ def main() -> int:
     test_link()
     test_config_and_actions()
     test_pointer_math()
+    test_pointer_pipeline()
+    test_raw_data()
+    test_app_server()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 

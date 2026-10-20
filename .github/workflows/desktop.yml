@@ -1,0 +1,29 @@
+name: Desktop self-test
+
+# The desktop half against synthesised hands and a fake phone on a socket.
+# No hardware involved, and the mouse is stubbed out.
+
+on:
+  push:
+    paths:
+      - 'handpilot/**'
+      - 'tools/**'
+      - 'run.py'
+      - '.github/workflows/desktop.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  selftest:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Self-test
+        run: python tools/selftest.py

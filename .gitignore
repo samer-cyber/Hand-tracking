@@ -1,7 +1,26 @@
+# Python
 __pycache__/
 *.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Your settings and recordings stay on your machine
 config.json
+config.json.tmp
+*.csv
+*.jsonl
+
+# iOS: the Xcode project is generated from project.yml
 ios/HandPilot/*.xcodeproj/
 ios/HandPilot/build/
 ios/HandPilot/out/
 ios/HandPilot/HandPilot/Info.plist
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

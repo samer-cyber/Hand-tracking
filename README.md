@@ -1,135 +1,112 @@
 # HandPilot
 
-Your iPhone's rear camera, running Apple's hand-pose model on the Neural Engine,
-driving your Windows cursor and a set of gestures over the USB cable.
+**Your iPhone, turned into a 120 fps hand tracker for your computer.**
+Steer the mouse with your hand, or just read the 21 hand landmarks from your own code.
 
-**Setup instructions are in [SETUP.md](SETUP.md).** This file is what it is and
-why it is built this way.
+![The HandPilot desktop app, tracking a (simulated) hand](docs/images/desktop.png)
 
----
+The iPhone runs Apple's hand-pose model on its Neural Engine, right next to the camera, and sends
+only the landmarks to your computer over the USB cable: 291 bytes a frame. No video ever leaves the
+phone. Every stage measures itself, so "it feels laggy" becomes a number on screen.
 
-## The shape of it
+## Why a phone beats a webcam
 
-```
-iPhone 17, rear wide camera            Windows
-┌──────────────────────────────┐      ┌────────────────────────────┐
-│ 1080p @ 120 fps, 1/500 s     │      │ usbmux client              │
-│          ↓                   │      │      ↓                     │
-│ VNDetectHumanHandPoseRequest │      │ features → pose / pointer  │
-│  (Neural Engine, on device)  │      │      ↓                     │
-│          ↓                   │      │ SendInput                  │
-│ 21 landmarks → 291 bytes     │─USB─▶│                            │
-│ TCP server, port 9871        │      │                            │
-└──────────────────────────────┘      └────────────────────────────┘
-```
+Webcam hand tracking with MediaPipe works, but it feels smeary and late. The model isn't the
+problem: measured on an ordinary laptop, MediaPipe takes about 8–18 ms a frame. **The webcam is.**
 
-No video ever leaves the phone. Each frame becomes 291 bytes — a header plus
-21 × (x, y, confidence) — which is about 35 KB/s at 120 fps and nothing at all to
-a USB cable.
-
-### Why the phone is the server
-
-Apple's USB multiplexer can open a tunnel from the PC *into* a TCP port on the
-phone. There is no route the other way. So the phone listens and the PC dials in,
-which is backwards from how you would write this over Wi-Fi, and is the single
-structural decision the rest of the protocol follows from.
-
-`handpilot/usbmux.py` speaks that protocol directly — the same thing `iproxy` and
-Xcode do — so there is no helper binary to install and no port-forwarding process
-to leave running. The same phone-side listener also serves plain Wi-Fi with no
-code change; the desktop just dials an IP instead.
-
-## Where the latency actually goes
-
-The interesting number is not any single stage, it is which stage you are
-*allowed* to fix. Roughly, per frame:
-
-| stage | cost | notes |
+| | Laptop webcam + MediaPipe | iPhone + HandPilot |
 |---|---|---|
-| exposure | 2 ms | 1/500 s. This is the motion-blur term, not really latency |
-| sensor readout and delivery | ~8 ms | one frame period at 120 fps — the floor |
-| Vision hand pose | measured live | shown in the app; expect single digits |
-| USB round trip | measured live | typically well under a millisecond |
-| desktop maths | <0.3 ms | shown in the app |
-| Windows input → pixels on screen | not measurable from here | compositor and display |
+| Frames per second | 30, often 15 in dim light | 60–240 |
+| Exposure per frame | ~1/30 s, automatic: a moving hand is a smear | 1/500 s, fixed: a sharp hand |
+| Hand moving 1 m/s smears by | ~3 cm, a third of your palm | ~2 mm |
+| Image processing | noise reduction that blends frames together | switched off |
+| What crosses the cable | video | 21 points |
 
-The app measures and displays every term it can, so "it feels laggy" turns into a
-number rather than a debate. Expect somewhere in the high teens of milliseconds
-from hand movement to cursor movement, most of it in the two stages nobody can
-remove: the frame period and the display.
+A smeared hand gives smeared landmarks, and at 30 fps the newest frame is already up to 33 ms old
+before any processing starts. A phone camera fixes both, and it's in your pocket already.
+[How it works](docs/how-it-works.md) has the latency budget and the details.
 
-Two settings exist specifically to buy back what is left. **Lead ahead** on the
-Pointer tab extrapolates along the current velocity, which trades a little
-overshoot on direction changes for a cursor that arrives when your hand does.
-**Responsiveness** opens the smoothing filter up as your hand speeds up.
+## What you can do with it
 
-## The two decisions that matter most on the camera
+- **Mouse.** The cursor follows your knuckles. Pinch thumb and index to click, hold the pinch to drag,
+  pinch thumb and middle to right-click, and hold two fingers up to scroll. **F9** releases control from
+  anywhere, even if the window is hidden.
+- **Raw data.** Stream the landmarks into Python, any language over UDP, or a web page. No mouse is
+  involved. See [docs/data.md](docs/data.md).
+- **Gestures** (experimental, off by default). Poses and swipes trigger actions such as volume or
+  next track.
 
-**Frame rate is a latency floor.** At 30 fps you are on average 16 ms out of date
-about where the hand is before any processing has started, and no amount of
-downstream cleverness recovers that. 120 fps cuts it to 4 ms.
+## Quick start
 
-**Shutter speed is an accuracy floor.** Frame rate bounds how *often* you learn
-where the hand is; shutter speed bounds how *smeared* each of those measurements
-is. A hand crossing the frame in 300 ms moves several of its own widths during a
-1/60 s exposure, and the landmark model then fits fingers to a streak. 1/500 s
-removes that — at the cost of roughly three stops of light, which is why there is
-an ISO servo and why a dim room is the one thing that will genuinely hold this
-setup back.
+1. **Get the iPhone app.** Build it in the cloud with no Mac (Codemagic or GitHub Actions, about five
+   minutes) or with Xcode, then install it with your own Apple ID.
+   → [docs/ios-build.md](docs/ios-build.md)
+2. **Run the desktop app.** You need Windows and Python 3.10 or newer, and nothing else to install.
+   Download this repository (*Code → Download ZIP*, or `git clone`), open a terminal in its folder,
+   and run:
+   ```
+   python run.py
+   ```
+3. **Connect.** Plug the iPhone in with a cable, open HandPilot on it and tap **Start**. Stand it about
+   a forearm's length away with the camera facing you. In the window, click **Calibrate screen area**,
+   sweep your hand around, then switch to **Mouse**.
 
-## Files
+Windows needs Apple's USB driver to see the phone. Install the free **Apple Devices** app from the
+Microsoft Store and open it once. Or use Wi-Fi instead (Advanced → Connection).
 
-**Phone** — `ios/HandPilot/HandPilot/`
+**Just want the data?** Close the app and:
+
+```python
+from handpilot import HandStream
+
+with HandStream() as hands:
+    for frame in hands:
+        if frame.hand:
+            print(frame.landmark("index_tip"))   # (x, y, confidence), x and y in 0..1
+```
+
+Or run `python run.py --stream` for JSON lines, or add `--csv --out hand.csv` to record a session.
+This part also works on macOS and Linux.
+
+## Using it well
+
+- **Light the room.** A 1/500 s shutter needs light. If the Light tile says *too dark for this
+  shutter*, turn on a lamp or choose 1/250.
+- **Steadiness** is the one smoothing control: *Responsive*, *Balanced* or *Steady*. The **Stillness**
+  tile shows how much the cursor wobbles while your hand is still. Watch it while you try them.
+- **Calibrate** to pick the area of the camera's view that becomes your screen. Choose a range you can
+  reach without moving your shoulder.
+
+More in the [user guide](docs/using.md), including fixes for anything that doesn't connect.
+
+## Honest limitations
+
+- Pointing in mid-air is less precise than a mouse. Studies put it at roughly 2.8 bits/s (a standard
+  speed-and-accuracy score from pointing tests) against 3.7–4.9 for a mouse, and your arm gets tired.
+  It's great for presenting, couch control, demos and creative coding. It is not a mouse replacement.
+- Mouse control is Windows-only for now.
+- Apps sideloaded with a free Apple ID expire after 7 days. Re-sign with Sideloadly; your settings are
+  kept.
+- Gestures are experimental: poses are easy to trigger by accident.
+
+## Documentation
 
 | | |
 |---|---|
-| `CaptureEngine.swift` | camera format, manual exposure, Vision, per-frame packet |
-| `Server.swift` | TCP listener, backpressure, JSON command channel |
-| `Wire.swift` | the packet format |
-| `ContentView.swift` | on-phone controls and status |
+| [Get the iPhone app](docs/ios-build.md) | Codemagic, GitHub Actions or Xcode, then sideloading |
+| [User guide](docs/using.md) | the window, calibration, tuning, troubleshooting |
+| [Raw data](docs/data.md) | Python API, command line, UDP, browser stream, wire format |
+| [How it works](docs/how-it-works.md) | architecture, latency, and how the jitter was fixed |
 
-**Desktop** — `handpilot/`
+## Related projects
 
-| | |
-|---|---|
-| `usbmux.py` | Apple's USB multiplexer protocol |
-| `link.py` | connect, read, reconnect, measure round trip |
-| `protocol.py` | packet parsing, resynchronising |
-| `handmodel.py` | landmarks → aspect-corrected, palm-normalised features |
-| `gestures.py` | pose classification, swipes, hold/repeat/cooldown |
-| `filters.py` | One Euro filter, hysteresis latches |
-| `controller.py` | pointer mode, gesture mode, global hotkeys |
-| `winput.py` | `SendInput` mouse and keyboard |
-| `actions.py` | the ~60 things a gesture can be bound to |
-| `ui.py` | the window |
+Others have connected phones and hands to computers before. [Gesture](https://github.com/Gesture-App/gesture)
+(2022) drove a computer's mouse from an iPhone over Bluetooth, sending updates about ten times a second.
+[TrackOSC](https://github.com/JGL/TrackOSC) and [VisionOSC](https://github.com/LingDong-/VisionOSC)
+stream Apple Vision results to creative tools over OSC. [Record3D](https://github.com/marek-simonik/record3d)
+streams iPhone depth video over USB. HandPilot's angle is latency: a high frame rate, a fast shutter,
+inference next to the sensor, and the cable instead of the radio.
 
-**Tools**
+## License
 
-```bash
-python tools/selftest.py
-```
-
-Runs the whole desktop half against synthesised hands, poses and a fake phone on
-a socket — 56 checks, no hardware needed. Worth running after changing any
-threshold, because the alternative way to discover a bad one is to stand in front
-of a camera waving.
-
-```bash
-python run.py --doctor
-```
-
-Walks the connection path one link at a time and names the specific fix, because
-"no Apple service", "no cable", "phone locked" and "app not started" all present
-identically as *it does not connect*.
-
-## Two things worth knowing before you use it
-
-**The phone gets warm.** 1080p120 plus continuous neural-engine inference is a
-real thermal load, and it is charging over the same cable. The status panel shows
-the thermal state; if it reaches *serious*, drop to 60 fps or turn off the phone's
-preview.
-
-**Pointer mode can run away with your mouse.** **F9** releases control from
-anywhere, and it is registered as a global hotkey precisely because the failure
-mode of a hand-driven cursor is one where clicking a Stop button is the thing you
-cannot reliably do.
+[MIT](LICENSE). Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).

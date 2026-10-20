@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "handpilot"
+version = "1.0.0"
+description = "Your iPhone as a 120 fps hand tracker: drive the mouse, or read the landmarks yourself."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["hand tracking", "iphone", "vision", "mouse", "landmarks", "gesture"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
+
+[project.scripts]
+handpilot = "handpilot.__main__:main"
+
+[tool.setuptools]
+packages = ["handpilot"]
+
+[tool.setuptools.package-data]
+handpilot = ["web/*"]

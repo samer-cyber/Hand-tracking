@@ -1,8 +1,13 @@
 """Settings, with defaults that are meant to be usable before you touch anything.
 
-Stored next to the project as ``config.json``. Unknown keys in the file are kept
-and missing ones are filled from the defaults, so an old config keeps working
-after new settings are added.
+Camera settings are not here. They live on the phone, which remembers them, and
+the desktop only ever asks it to change them -- two copies of the same setting
+is how a phone ends up silently reverting whatever you just picked on it.
+
+Stored as ``config.json``: next to ``run.py`` when running from a checkout, in
+the user's app-data folder when installed, or wherever ``HANDPILOT_CONFIG``
+points. Unknown keys in the file are kept and missing ones are filled from the
+defaults, so an old config keeps working after new settings are added.
 """
 
 from __future__ import annotations
@@ -11,44 +16,64 @@ import copy
 import json
 import os
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                           "config.json")
+_PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+_CHECKOUT_DIR = os.path.dirname(_PACKAGE_DIR)
+
+
+def _default_path() -> str:
+    override = os.environ.get("HANDPILOT_CONFIG")
+    if override:
+        return override
+    if os.path.exists(os.path.join(_CHECKOUT_DIR, "run.py")):
+        return os.path.join(_CHECKOUT_DIR, "config.json")
+    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "HandPilot", "config.json")
+
+
+CONFIG_PATH = _default_path()
+VERSION = 2
 
 DEFAULTS: dict = {
+    "version": VERSION,
     "transport": "usb",
     "wifi_host": "",
     "port": 9871,
     "autoconnect": True,
-
-    "camera": {
-        "fps": 120,
-        "shutter": 500,
-        "iso_auto": True,
-        "iso": 800,
-        "iso_ceiling": 4000,
-        "zoom": 1.0,
-        "focus_auto": True,
-        "lens": 0.55,
-        "orientation": -1,
-    },
-
     "mode": "off",
 
-    # Which part of the camera's view maps onto the screen, as
-    # (left, top, right, bottom) in normalised image coordinates. The default is
-    # a middle box rather than the whole frame: reaching the physical corners of
-    # the camera's field of view means fully extending your arm, and the corners
-    # are also where the lens distorts most.
     "pointer": {
+        # Which part of the camera's view maps onto the screen, as
+        # (left, top, right, bottom) in normalised image coordinates. The default
+        # is a middle box rather than the whole frame: reaching the physical
+        # corners of the camera's view means fully extending your arm, and the
+        # corners are also where the lens distorts most.
         "region": [0.18, 0.15, 0.82, 0.85],
+        # What the cursor follows. "knuckles" is the average of the four
+        # knuckles: the steadiest points the model reports, and they barely move
+        # when you pinch. "pinch" is the midpoint of thumb and index tips, which
+        # feels more direct but inherits the thumb tip's noise.
+        "anchor": "knuckles",
+        # The one smoothing control: 0 is most responsive, 1 is steadiest. It
+        # drives the One Euro filter and the still-hand dead zone together.
+        "steadiness": 0.5,
+        # Expert override of the three values `steadiness` normally sets.
+        "custom_filter": False,
+        "min_cutoff": 0.7,
+        "beta": 0.0095,
+        "deadzone_px": 1.8,
+        # Extrapolation along the current velocity. Off by default: it buys a
+        # few milliseconds and pays for them with an overshoot every time the
+        # hand stops.
+        "lead_ms": 0.0,
         # The camera faces you, so it sees you the way another person would:
         # your right hand appears on its left. Without this the cursor goes the
         # wrong way and nothing else can be judged.
         "flip_x": True,
         "flip_y": False,
-        "min_cutoff": 1.2,
-        "beta": 0.03,
-        "lead_ms": 0.0,
+        # "primary" maps the region onto the main monitor; "all" onto the whole
+        # virtual desktop, which doubles the gain on a two-monitor setup.
+        "screen": "primary",
+        "click": True,
         "pinch_on": 0.30,
         "pinch_off": 0.44,
         # How far the pointer may wander during a pinch and still count as a
@@ -65,6 +90,22 @@ DEFAULTS: dict = {
         "conf_min": 0.35,
         # How long the hand may be missing before any held button is released.
         "lost_release_ms": 220,
+        # Until the first calibration (or after the tracking point changes) the
+        # window asks for one: the default region is only a guess at your reach.
+        "needs_calibration": True,
+    },
+
+    # Raw landmarks for other programs. Both are off by default: anything that
+    # can reach the port can watch your hand.
+    "stream": {
+        "udp": False,
+        "udp_target": "127.0.0.1:9872",
+        "browser": False,
+    },
+
+    "ui": {
+        "port": 9870,
+        "experimental_gestures": False,
     },
 
     "gestures": {
@@ -125,18 +166,46 @@ def _merge(base: dict, override: dict) -> dict:
     return out
 
 
-def load(path: str = CONFIG_PATH) -> dict:
+def _migrate(raw: dict) -> dict:
+    """Bring a version-1 file (the Tkinter app's) up to date.
+
+    Some values from that era are reset rather than carried over: its
+    "Smoothing" slider was inverted, so saved filter values are usually the
+    opposite of what was intended; its lead-ahead overshot on every stop; and
+    click thresholds were usually pushed to extremes to fight jitter in an
+    unsmoothed pinch measurement that no longer exists. The region is kept but
+    flagged, because it was calibrated for the old fingertip tracking point.
+    """
+    if raw.get("version", 1) >= VERSION:
+        return raw
+    raw = copy.deepcopy(raw)
+    raw.pop("camera", None)
+    pointer = raw.setdefault("pointer", {})
+    for key in ("min_cutoff", "beta", "lead_ms", "pinch_on", "pinch_off",
+                "right_pinch_on", "right_pinch_off"):
+        pointer.pop(key, None)
+    pointer["needs_calibration"] = True
+    raw["version"] = VERSION
+    return raw
+
+
+def load(path: str | None = None) -> dict:
+    path = path or CONFIG_PATH
     if not os.path.exists(path):
         return copy.deepcopy(DEFAULTS)
     try:
         with open(path, "r", encoding="utf-8") as handle:
-            return _merge(DEFAULTS, json.load(handle))
-    except (OSError, json.JSONDecodeError):
+            return _merge(DEFAULTS, _migrate(json.load(handle)))
+    except (OSError, ValueError):
         # A corrupt config should cost the customisation, not the session.
         return copy.deepcopy(DEFAULTS)
 
 
-def save(config: dict, path: str = CONFIG_PATH) -> None:
+def save(config: dict, path: str | None = None) -> None:
+    path = path or CONFIG_PATH
+    folder = os.path.dirname(path)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as handle:
         json.dump(config, handle, indent=2)

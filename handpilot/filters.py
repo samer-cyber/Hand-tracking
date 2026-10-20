@@ -69,6 +69,57 @@ class OneEuro2D:
         return self._x, self._y
 
 
+def feel(steadiness: float) -> tuple[float, float, float]:
+    """The single "steadiness" control, as (min_cutoff Hz, beta, dead zone px).
+
+    0 is most responsive, 1 steadiest. Two raw One Euro sliders were the old
+    interface, and they failed in a predictable way: the cutoff runs backwards
+    to what "smoothing" suggests, and beta -- the one that actually decides how
+    much jitter survives, because the noise's own apparent speed opens the
+    filter -- had no meaningful name at all. Both, plus the dead zone, are moved
+    together here along a curve that stays near the measured jitter/lag
+    frontier. Units are pixels of a 1080-line screen; the pointer rescales.
+    """
+    s = min(1.0, max(0.0, steadiness))
+    min_cutoff = 1.4 * (0.25 ** s)          # 1.4 Hz -> 0.35 Hz
+    beta = 0.03 * (0.1 ** s)                # 0.03 -> 0.003
+    deadzone = 0.6 + 2.4 * s                # 0.6 px -> 3.0 px
+    return min_cutoff, beta, deadzone
+
+
+class Rope:
+    """A dead zone that follows instead of snapping.
+
+    The output only moves once the input has pulled further than ``radius``
+    away, and then it is dragged along at that distance, like a weight on a
+    short rope. A still hand therefore holds the cursor perfectly still --
+    whatever sub-pixel jitter survives the filter never reaches the screen --
+    while a moving hand loses only ``radius`` pixels of lag, which at one or two
+    pixels is below what anyone can see.
+    """
+
+    def __init__(self, radius: float = 1.5) -> None:
+        self.radius = radius
+        self._x = 0.0
+        self._y = 0.0
+        self._primed = False
+
+    def reset(self) -> None:
+        self._primed = False
+
+    def __call__(self, x: float, y: float) -> tuple[float, float]:
+        if not self._primed:
+            self._x, self._y, self._primed = x, y, True
+            return x, y
+        dx, dy = x - self._x, y - self._y
+        distance = math.hypot(dx, dy)
+        if distance > self.radius:
+            pull = (distance - self.radius) / distance
+            self._x += dx * pull
+            self._y += dy * pull
+        return self._x, self._y
+
+
 class Hysteresis:
     """A latch with separate on and off thresholds.
 

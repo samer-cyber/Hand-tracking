@@ -29,6 +29,12 @@ FINGER_NAMES = ("thumb", "index", "middle", "ring", "little")
 TIPS = (THUMB_TIP, INDEX_TIP, MIDDLE_TIP, RING_TIP, LITTLE_TIP)
 MCPS = (THUMB_MCP, INDEX_MCP, MIDDLE_MCP, RING_MCP, LITTLE_MCP)
 
+#: The knuckle row the pointer rides on by default. Knuckles are the steadiest
+#: points a hand model reports -- fingertips sit at the end of a long chain of
+#: guesses and the thumb tip is the noisiest of all -- and they barely move when
+#: the fingers pinch, which is exactly when the pointer must not move.
+KNUCKLES = (INDEX_MCP, MIDDLE_MCP, RING_MCP, LITTLE_MCP)
+
 #: Drawn by the desktop preview, and a useful sanity check when tracking looks
 #: wrong: a skeleton with crossed bones means the landmark order is off.
 BONES = (
@@ -92,6 +98,16 @@ class Hand:
     thumb_dir: tuple
     #: Mean confidence over the joints any decision here depends on.
     quality: float
+    #: Confidence-weighted centre of the knuckle row, in the same raw normalised
+    #: coordinates as ``point_x``/``point_y``.
+    knuckle_x: float = 0.0
+    knuckle_y: float = 0.0
+
+    def anchor(self, kind: str = "knuckles") -> tuple[float, float]:
+        """The point the cursor follows, in normalised image coordinates."""
+        if kind == "pinch":
+            return self.point_x, self.point_y
+        return self.knuckle_x, self.knuckle_y
 
 
 def _dist(px, py, a: int, b: int) -> float:
@@ -139,6 +155,8 @@ def build(frame, conf_min: float = 0.3) -> Hand:
     tlen = math.hypot(tdx, tdy) or 1.0
 
     palm_ids = (WRIST, INDEX_MCP, MIDDLE_MCP, RING_MCP, LITTLE_MCP)
+    weights = [max(conf[i], 1e-3) for i in KNUCKLES]
+    total = sum(weights)
     return Hand(
         ok=True,
         px=px, py=py, conf=list(conf),
@@ -154,4 +172,6 @@ def build(frame, conf_min: float = 0.3) -> Hand:
         palm_y=sum(py[i] for i in palm_ids) / len(palm_ids),
         thumb_dir=(tdx / tlen, tdy / tlen),
         quality=quality,
+        knuckle_x=sum(frame.x[i] * w for i, w in zip(KNUCKLES, weights)) / total,
+        knuckle_y=sum(frame.y[i] * w for i, w in zip(KNUCKLES, weights)) / total,
     )

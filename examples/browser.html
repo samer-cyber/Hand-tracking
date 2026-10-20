@@ -1,0 +1,57 @@
+<!doctype html>
+<!--
+  Draws your hand live in the browser from HandPilot's browser stream.
+
+  1. In the HandPilot window, switch on  Raw data > Browser stream.
+  2. Open this file in a browser (double-click it).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HandPilot browser stream</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0a0d14; color: #95a1b8;
+                 font: 14px system-ui, sans-serif; }
+    canvas { display: block; width: 100%; height: 100%; }
+    #status { position: fixed; left: 16px; top: 12px; }
+  </style>
+</head>
+<body>
+  <div id="status">connecting to http://127.0.0.1:9870/stream …</div>
+  <canvas id="c"></canvas>
+  <script>
+    const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],
+                   [11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+    const canvas = document.getElementById("c");
+    const ctx = canvas.getContext("2d");
+    const status = document.getElementById("status");
+    let frame = null;
+
+    const hands = new EventSource("http://127.0.0.1:9870/stream");
+    hands.onopen = () => { status.textContent = "connected"; };
+    hands.onerror = () => { status.textContent = "not connected: is the browser stream switched on in HandPilot?"; };
+    hands.onmessage = (event) => { frame = JSON.parse(event.data); };
+
+    function draw() {
+      const w = canvas.width = canvas.clientWidth * devicePixelRatio;
+      const h = canvas.height = canvas.clientHeight * devicePixelRatio;
+      ctx.clearRect(0, 0, w, h);
+      if (frame && frame.hand) {
+        // Mirror x so the drawing moves the way your hand does.
+        const p = frame.landmarks.map(([x, y]) => [(1 - x) * w, y * h]);
+        ctx.strokeStyle = "#3ddc84";
+        ctx.lineWidth = 4 * devicePixelRatio;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        for (const [a, b] of BONES) { ctx.moveTo(...p[a]); ctx.lineTo(...p[b]); }
+        ctx.stroke();
+        ctx.fillStyle = "#ffffff";
+        for (const [x, y] of p) { ctx.beginPath(); ctx.arc(x, y, 5 * devicePixelRatio, 0, 7); ctx.fill(); }
+      }
+      requestAnimationFrame(draw);
+    }
+    draw();
+  </script>
+</body>
+</html>

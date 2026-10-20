@@ -32,6 +32,7 @@ MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_VIRTUALDESK = 0x8000, 0x4000
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_EXTENDEDKEY = 0x0001
 
+SM_CXSCREEN, SM_CYSCREEN = 0, 1
 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN = 76, 77
 SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
 
@@ -109,6 +110,12 @@ def virtual_screen() -> tuple[int, int, int, int]:
             user32.GetSystemMetrics(SM_YVIRTUALSCREEN),
             user32.GetSystemMetrics(SM_CXVIRTUALSCREEN),
             user32.GetSystemMetrics(SM_CYVIRTUALSCREEN))
+
+
+def primary_screen() -> tuple[int, int, int, int]:
+    """(left, top, width, height) of the main monitor, which always sits at the
+    origin of the virtual desktop."""
+    return 0, 0, user32.GetSystemMetrics(SM_CXSCREEN), user32.GetSystemMetrics(SM_CYSCREEN)
 
 
 class POINT(ctypes.Structure):

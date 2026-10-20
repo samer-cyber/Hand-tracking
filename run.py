@@ -1,14 +1,12 @@
 """Start HandPilot.
 
-    python run.py            open the window
-    python run.py --doctor   check the connection path and exit
+    python run.py              open the app
+    python run.py --stream     raw hand data, no mouse
+    python run.py --doctor     check the connection to the phone
+    python run.py --help       everything else
 """
 
-import sys
+from handpilot.__main__ import main
 
 if __name__ == "__main__":
-    if "--doctor" in sys.argv:
-        from tools.doctor import main as doctor
-        raise SystemExit(doctor())
-    from handpilot.ui import main
-    main()
+    raise SystemExit(main())

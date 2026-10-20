@@ -1,0 +1,11 @@
+# Normalise line endings in the repository; check out natively on each OS.
+* text=auto
+
+# Scripts and build files that run on macOS/Linux build machines.
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.swift text eol=lf
+
+*.png binary
+*.ipa binary

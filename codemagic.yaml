@@ -1,0 +1,63 @@
+# Build the HandPilot iPhone app on Codemagic -- no Mac needed.
+#
+# The result is an UNSIGNED .ipa. Sideload it with Sideloadly or AltStore,
+# which sign it with your own Apple ID on your own computer.
+#
+# Setup (once): codemagic.io -> Add application -> pick this repository ->
+# "codemagic.yaml" is detected. Then: Start new build -> workflow
+# "HandPilot iPhone app" -> download HandPilot-unsigned.ipa from Artifacts.
+# Full walkthrough: docs/ios-build.md
+#
+# The free Codemagic plan includes 500 macOS build minutes a month; one build
+# takes about five.
+
+workflows:
+  handpilot-ios:
+    name: HandPilot iPhone app (unsigned IPA)
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      xcode: latest
+      vars:
+        HOMEBREW_NO_AUTO_UPDATE: 1
+    scripts:
+      - name: Install XcodeGen
+        script: brew install xcodegen
+
+      # The Xcode project is generated from ios/HandPilot/project.yml rather
+      # than committed, so it can never drift out of date.
+      - name: Generate the Xcode project
+        script: |
+          cd ios/HandPilot
+          xcodegen generate
+
+      - name: Build (no code signing)
+        script: |
+          set -euo pipefail
+          cd ios/HandPilot
+          xcodebuild \
+            -project HandPilot.xcodeproj \
+            -scheme HandPilot \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package the IPA
+        script: |
+          set -euo pipefail
+          cd ios/HandPilot
+          APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          if [ -z "$APP" ]; then echo "no .app was produced"; exit 1; fi
+          rm -rf out
+          mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          (cd out && zip -qry HandPilot-unsigned.ipa Payload)
+          ls -lh out/HandPilot-unsigned.ipa
+
+    artifacts:
+      - ios/HandPilot/out/HandPilot-unsigned.ipa

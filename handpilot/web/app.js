@@ -21,10 +21,13 @@
     [17, 18], [18, 19], [19, 20], [0, 17]];
   const TIPS = new Set([4, 8, 12, 16, 20]);
   const THERMAL = [["Cool", "good"], ["Warm", ""], ["Hot", "warn"], ["Too hot", "bad"]];
+  // Green means "tracking is good" and nothing else; the screen area and the
+  // cursor point use the accent; an unsure hand is drawn grey, not alarmed.
   const COLORS = {
-    green: "#3ddc84", amber: "#f6b445", blue: "#5b9cff", red: "#ff6b6b",
-    frame: "#1f2a40", grid: "rgba(255,255,255,0.035)", text: "#95a1b8",
+    ok: "#5bc98f", accent: "#e3a548", unsure: "#8f8f8f", pressed: "#ef6b63",
+    frame: "#2a2a2a", grid: "rgba(255,255,255,0.03)", text: "#a1a1a1", faint: "#6f6f6f",
   };
+  const TABS = ["control", "camera", "data", "more"];
   const PRESETS = [0.15, 0.5, 0.85];
   const PENDING_MS = 1500;
 
@@ -237,6 +240,16 @@
         if (reply && action === "connect") toast("Reconnecting…");
       });
     }
+    for (const tab of $$(".tabs [role=tab]")) {
+      tab.addEventListener("click", () => selectTab(tab.dataset.tab, true));
+    }
+    $(".tabs").addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+      const current = TABS.indexOf($(".tabs [aria-selected=true]").dataset.tab);
+      const next = TABS[(current + (event.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length];
+      selectTab(next, true);
+      $(`#tab-${next}`).focus();
+    });
     $("#calibCancel").addEventListener("click", () => command("cancel_calibration"));
     $("#retry").addEventListener("click", () => { command("connect"); toast("Retrying…"); });
     $("#diagnose").addEventListener("click", diagnose);
@@ -251,6 +264,20 @@
       });
     }
     window.addEventListener("resize", requestDraw);
+  }
+
+  function selectTab(name, remember) {
+    if (!TABS.includes(name)) name = "control";
+    for (const tab of $$(".tabs [role=tab]")) {
+      const on = tab.dataset.tab === name;
+      tab.setAttribute("aria-selected", String(on));
+      tab.tabIndex = on ? 0 : -1;
+    }
+    for (const pane of $$(".pane")) pane.hidden = pane.id !== `pane-${name}`;
+    $(".panes").scrollTop = 0;
+    if (remember) {
+      try { localStorage.setItem("handpilot-tab", name); } catch (_) { /* storage blocked: fine */ }
+    }
   }
 
   async function diagnose() {
@@ -300,6 +327,7 @@
       $(sel).disabled = !custom;
     }
     $('[data-path="pointer.pinch_on"]').disabled = !p.click;
+    $('[data-path="pointer.pinch_off"]').disabled = !p.click;
     $("#wifiField").hidden = cfg.transport !== "wifi";
     $('[data-path="stream.udp_target"]').disabled = !cfg.stream.udp;
     $("#mode button[data-value='gestures']").hidden = !cfg.ui.experimental_gestures;
@@ -468,40 +496,40 @@
 
   function renderMetrics(phone, connected) {
     if (!connected) {
-      for (const id of ["#mLatency", "#mTracking", "#mVision", "#mStill", "#mLight", "#mPhone"]) setMetric(id, "–");
+      for (const id of ["#mLatency", "#mTracking", "#mVision", "#mStill", "#mLight", "#mPhone"]) setMetric(id, "–", "");
       return;
     }
     const latency = live.latency;
-    setMetric("#mLatency", latency == null ? "–" : `${Math.round(latency)} ms`, "sensor to cursor, est.",
-      latency == null ? "" : latency < 30 ? "good" : latency > 60 ? "warn" : "");
+    setMetric("#mLatency", latency == null ? "–" : `${Math.round(latency)} ms`, "",
+      latency != null && latency > 60 ? "warn" : "");
 
     const tracked = phone.tracked_fps || 0;
     const captured = phone.capture_fps || 0;
-    setMetric("#mTracking", `${Math.round(tracked)} fps`, captured ? `of ${Math.round(captured)} captured` : "frames per second",
-      captured && tracked < captured * 0.8 ? "warn" : "");
+    const behind = captured && tracked < captured * 0.8;
+    setMetric("#mTracking", `${Math.round(tracked)} fps`, behind ? `of ${Math.round(captured)}` : "",
+      behind ? "warn" : "");
 
     const vision = phone.inference_ms;
-    setMetric("#mVision", vision == null ? "–" : `${vision.toFixed(1)} ms`, "on the iPhone");
+    setMetric("#mVision", vision == null ? "–" : `${vision.toFixed(1)} ms`, "");
 
     if (live.mode === "pointer" && live.frame) {
       const out = live.pointer.stillness;
-      setMetric("#mStill", `±${out.toFixed(1)} px`, `raw ±${live.pointer.stillness_raw.toFixed(1)} px`,
+      setMetric("#mStill", `±${out.toFixed(1)} px`, `raw ±${live.pointer.stillness_raw.toFixed(1)}`,
         out < 0.5 ? "good" : out > 2 ? "warn" : "");
     } else {
-      setMetric("#mStill", "–", live.mode === "pointer" ? "hold your hand still" : "in Mouse mode");
+      setMetric("#mStill", "–", live.mode === "pointer" ? "" : "Mouse mode only");
     }
 
     const iso = phone.iso;
     const settings = phone.settings || {};
     const ceiling = Math.min(settings.iso_ceiling || Infinity, phone.iso_max || Infinity);
     const dark = iso && Number.isFinite(ceiling) && iso >= ceiling * 0.97;
-    setMetric("#mLight", iso ? `ISO ${iso}` : "–",
-      dark ? "too dark for this shutter" : phone.shutter ? `1/${phone.shutter} s shutter` : "camera ISO",
-      dark ? "warn" : "");
+    setMetric("#mLight", iso ? `ISO ${iso}` : "–", dark ? "too dark" : "", dark ? "warn" : "");
 
     const thermal = THERMAL[Math.min(Number(phone.thermal || 0), 3)];
     const dropped = phone.dropped || 0;
-    setMetric("#mPhone", thermal[0], dropped ? `${dropped} frames dropped` : "temperature", thermal[1]);
+    setMetric("#mPhone", thermal[0], dropped ? `${dropped} dropped` : "",
+      thermal[1] === "good" ? "" : thermal[1]);
   }
 
   function renderPinch() {
@@ -515,7 +543,7 @@
     }
     if (pinch == null) {
       fill.style.transform = "scaleX(0)";
-      $("#pinchText").textContent = "Pinch gap –";
+      $("#pinchText").textContent = "Finger gap –";
       $("#pinchState").textContent = "";
       return;
     }
@@ -523,7 +551,7 @@
     const closed = down || (p && pinch < p.pinch_on);
     fill.style.transform = `scaleX(${Math.min(1, pinch / full)})`;
     fill.classList.toggle("closed", Boolean(closed));
-    $("#pinchText").textContent = `Pinch gap ${pinch.toFixed(2)}`;
+    $("#pinchText").textContent = `Finger gap ${pinch.toFixed(2)}`;
     $("#pinchState").textContent = down === "right" ? "Right click" : down ? "Clicking" : closed ? "Would click" : "";
   }
 
@@ -646,23 +674,23 @@
 
     const needsCal = live && live.needs_calibration;
     const [rx, ry, rw, rh] = box(p.region);
-    ctx.fillStyle = needsCal ? "rgba(246,180,69,0.05)" : "rgba(91,156,255,0.06)";
+    ctx.fillStyle = needsCal ? "rgba(255,255,255,0.02)" : "rgba(227,165,72,0.06)";
     ctx.fillRect(rx, ry, rw, rh);
     ctx.setLineDash([6, 5]);
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = needsCal ? COLORS.amber : COLORS.blue;
+    ctx.strokeStyle = needsCal ? COLORS.faint : COLORS.accent;
     ctx.strokeRect(rx, ry, rw, rh);
     ctx.setLineDash([]);
-    ctx.font = "600 11px Segoe UI, system-ui, sans-serif";
-    ctx.fillStyle = needsCal ? COLORS.amber : COLORS.blue;
-    ctx.fillText(needsCal ? "SCREEN AREA · NOT CALIBRATED YET" : "SCREEN AREA", rx + 6, Math.max(oy + 14, ry - 7));
+    ctx.font = "12px Segoe UI, system-ui, sans-serif";
+    ctx.fillStyle = needsCal ? COLORS.text : COLORS.accent;
+    ctx.fillText(needsCal ? "Screen area (not calibrated yet)" : "Screen area", rx + 6, Math.max(oy + 14, ry - 7));
 
     const calib = live && live.calib;
     if (calib && calib.bounds) {
       const [cx, cy, cw2, ch2] = box(calib.bounds);
-      ctx.fillStyle = "rgba(61,220,132,0.08)";
+      ctx.fillStyle = "rgba(91,201,143,0.08)";
       ctx.fillRect(cx, cy, cw2, ch2);
-      ctx.strokeStyle = COLORS.green;
+      ctx.strokeStyle = COLORS.ok;
       ctx.lineWidth = 2;
       ctx.strokeRect(cx, cy, cw2, ch2);
     }
@@ -679,7 +707,7 @@
     }
 
     ctx.globalAlpha = f.age > 350 ? 0.35 : 1;
-    const color = f.usable ? COLORS.green : COLORS.amber;
+    const color = f.usable ? COLORS.ok : COLORS.unsure;
     const pts = f.x.map((x, i) => place(x, f.y[i]));
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -705,7 +733,7 @@
       const closed = ptr.down || ptr.pinch < p.pinch_on;
       ctx.setLineDash([3, 4]);
       ctx.lineWidth = 1.5;
-      ctx.strokeStyle = closed ? COLORS.green : "rgba(255,255,255,0.55)";
+      ctx.strokeStyle = closed ? COLORS.ok : "rgba(255,255,255,0.5)";
       ctx.beginPath();
       ctx.moveTo(pts[4][0], pts[4][1]);
       ctx.lineTo(pts[8][0], pts[8][1]);
@@ -715,7 +743,7 @@
 
     if (ptr.anchor) {
       const [ax, ay] = place(ptr.anchor[0], ptr.anchor[1]);
-      const ring = ptr.down ? COLORS.red : COLORS.blue;
+      const ring = ptr.down ? COLORS.pressed : COLORS.accent;
       ctx.lineWidth = 2.5;
       ctx.strokeStyle = ring;
       ctx.beginPath();
@@ -749,9 +777,10 @@
     }
     connectLive();
     requestDraw();
-    // Deep links such as #advanced open that section.
-    const section = location.hash && document.getElementById(location.hash.slice(1));
-    if (section && section.tagName === "DETAILS") section.open = true;
+    // #data, #camera... open that tab; otherwise the one used last.
+    let saved = null;
+    try { saved = localStorage.getItem("handpilot-tab"); } catch (_) { /* storage blocked */ }
+    selectTab(location.hash.slice(1) || saved || "control", false);
   }
 
   start();

@@ -12,17 +12,14 @@
   <header class="topbar">
     <div class="brand">
       <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
-        <rect x="1" y="1" width="30" height="30" rx="9" class="logo-bg"/>
-        <g class="logo-bones">
-          <path d="M16 25.5 9.4 18.6M16 25.5V10.2M16 25.5l4.4-14M16 25.5l7.6-10.6M16 25.5l-3.2-14.6"/>
-        </g>
+        <path class="logo-bones" d="M16 25.5 9.4 18.6M16 25.5V10.2M16 25.5l4.4-14M16 25.5l7.6-10.6M16 25.5l-3.2-14.6"/>
         <g class="logo-joints">
           <circle cx="16" cy="25.5" r="2.1"/><circle cx="9.4" cy="18.6" r="1.6"/>
           <circle cx="12.8" cy="10.9" r="1.6"/><circle cx="16" cy="8.6" r="1.6"/>
           <circle cx="20.4" cy="10" r="1.6"/><circle cx="23.6" cy="14.4" r="1.6"/>
         </g>
       </svg>
-      <span class="name">HandPilot</span>
+      <span>HandPilot</span>
     </div>
 
     <div class="status" id="status" role="status" aria-live="polite">
@@ -37,7 +34,7 @@
       <button type="button" role="radio" data-value="gestures" hidden>Gestures</button>
     </div>
     <div class="panic" title="Works even when this window is in the background">
-      <kbd>F9</kbd> stops control · <kbd>F10</kbd> toggles
+      <kbd>F9</kbd> stops control
     </div>
   </header>
 
@@ -51,17 +48,16 @@
             <h2>Waiting for your iPhone</h2>
             <ol class="steps">
               <li>Plug the iPhone into this computer with a cable.</li>
-              <li>Open <b>HandPilot</b> on the iPhone and tap <b>Start</b>.</li>
-              <li>That’s it: this window connects on its own.</li>
+              <li>Open HandPilot on the iPhone and tap Start.</li>
             </ol>
+            <p class="muted">This window connects as soon as the phone is ready.</p>
             <p class="error-line" id="connectError"></p>
             <div class="row">
               <button type="button" class="btn primary" id="diagnose">Diagnose connection</button>
-              <button type="button" class="btn" id="retry">Retry now</button>
+              <button type="button" class="btn" id="retry">Retry</button>
             </div>
             <ul class="checks" id="checks"></ul>
-            <p class="hint">No iPhone app yet? You can build it without a Mac. See
-              <code>docs/ios-build.md</code>.</p>
+            <p class="hint">No iPhone app yet? It builds without a Mac: see <code>docs/ios-build.md</code>.</p>
           </div>
         </div>
 
@@ -75,8 +71,8 @@
           </div>
           <div class="calib-text">
             <h3>Sweep your hand around</h3>
-            <p>Cover the whole area you want to use, without moving your shoulder.
-              The green box becomes your screen.</p>
+            <p>Cover the area you want to use, without moving your shoulder. The box you sweep out becomes
+              your screen.</p>
             <button type="button" class="btn small" id="calibCancel">Cancel</button>
           </div>
         </div>
@@ -89,241 +85,250 @@
         <div class="pose" id="pose" hidden></div>
       </div>
 
-      <div class="metrics">
-        <div class="metric" id="mLatency"><span class="m-label">Latency</span><span class="m-value">–</span><span class="m-sub">sensor to cursor, est.</span></div>
-        <div class="metric" id="mTracking"><span class="m-label">Tracking</span><span class="m-value">–</span><span class="m-sub">frames per second</span></div>
-        <div class="metric" id="mVision"><span class="m-label">Hand model</span><span class="m-value">–</span><span class="m-sub">on the iPhone</span></div>
-        <div class="metric" id="mStill"><span class="m-label">Stillness</span><span class="m-value">–</span><span class="m-sub">hold still to measure</span></div>
-        <div class="metric" id="mLight"><span class="m-label">Light</span><span class="m-value">–</span><span class="m-sub">camera ISO</span></div>
-        <div class="metric" id="mPhone"><span class="m-label">iPhone</span><span class="m-value">–</span><span class="m-sub">temperature</span></div>
+      <div class="metrics" aria-label="Live measurements">
+        <div class="metric" id="mLatency"><span class="m-label">Latency</span><span class="m-value">–</span><span class="m-sub"></span></div>
+        <div class="metric" id="mTracking"><span class="m-label">Tracking</span><span class="m-value">–</span><span class="m-sub"></span></div>
+        <div class="metric" id="mVision"><span class="m-label">Hand model</span><span class="m-value">–</span><span class="m-sub"></span></div>
+        <div class="metric" id="mStill"><span class="m-label">Stillness</span><span class="m-value">–</span><span class="m-sub"></span></div>
+        <div class="metric" id="mLight"><span class="m-label">Light</span><span class="m-value">–</span><span class="m-sub"></span></div>
+        <div class="metric" id="mPhone"><span class="m-label">iPhone</span><span class="m-value">–</span><span class="m-sub"></span></div>
       </div>
     </section>
 
     <aside class="panel" aria-label="Settings">
-      <section class="card">
-        <h2 class="card-title">Feel</h2>
-        <div class="segmented wide" id="feelPresets" role="radiogroup" aria-label="Preset">
-          <button type="button" role="radio" data-steadiness="0.15">Responsive</button>
-          <button type="button" role="radio" data-steadiness="0.5">Balanced</button>
-          <button type="button" role="radio" data-steadiness="0.85">Steady</button>
-        </div>
-        <label class="slider">
-          <span class="slider-head"><span>Steadiness</span><output data-out="pointer.steadiness"></output></span>
-          <input type="range" min="0" max="100" step="1" data-path="pointer.steadiness" data-scale="100" data-fmt="pct">
-          <span class="slider-ends"><span>quicker</span><span>steadier</span></span>
-        </label>
-        <div class="field">
-          <span class="field-label">Cursor follows your</span>
-          <div class="segmented" data-path="pointer.anchor" role="radiogroup" aria-label="Cursor follows">
-            <button type="button" role="radio" data-value="knuckles">Knuckles</button>
-            <button type="button" role="radio" data-value="pinch">Fingertips</button>
-          </div>
-        </div>
-        <button type="button" class="btn primary block" data-action="calibrate">Calibrate screen area</button>
-        <p class="hint" id="customNote" hidden>Custom filter values are on (Advanced), so the steadiness control is paused.</p>
-      </section>
+      <nav class="tabs" role="tablist" aria-label="Settings sections">
+        <button type="button" role="tab" id="tab-control" aria-controls="pane-control" data-tab="control">Control</button>
+        <button type="button" role="tab" id="tab-camera" aria-controls="pane-camera" data-tab="camera">Camera</button>
+        <button type="button" role="tab" id="tab-data" aria-controls="pane-data" data-tab="data">Data</button>
+        <button type="button" role="tab" id="tab-more" aria-controls="pane-more" data-tab="more">More</button>
+      </nav>
 
-      <section class="card">
-        <h2 class="card-title">Click</h2>
-        <label class="toggle"><input type="checkbox" data-path="pointer.click"><span class="track" aria-hidden="true"></span><span>Pinch thumb and index to click</span></label>
-        <div class="pinch">
-          <div class="pinch-bar" aria-hidden="true">
-            <div class="pinch-fill" id="pinchFill"></div>
-            <div class="pinch-mark on" id="pinchOn"></div>
-            <div class="pinch-mark off" id="pinchOff"></div>
+      <div class="panes">
+        <!-- Control ---------------------------------------------------------->
+        <section class="pane" role="tabpanel" id="pane-control" aria-labelledby="tab-control">
+          <h2>Feel</h2>
+          <div class="segmented wide" id="feelPresets" role="radiogroup" aria-label="Preset">
+            <button type="button" role="radio" data-steadiness="0.15">Responsive</button>
+            <button type="button" role="radio" data-steadiness="0.5">Balanced</button>
+            <button type="button" role="radio" data-steadiness="0.85">Steady</button>
           </div>
-          <div class="pinch-text"><span id="pinchText">Pinch gap –</span><span class="pinch-state" id="pinchState"></span></div>
-        </div>
-        <label class="slider">
-          <span class="slider-head"><span>Click sensitivity</span><output data-out="pointer.pinch_on"></output></span>
-          <input type="range" min="10" max="50" step="1" data-path="pointer.pinch_on" data-scale="100" data-fmt="gap">
-          <span class="slider-ends"><span>fingers must touch</span><span>clicks earlier</span></span>
-        </label>
-        <label class="toggle"><input type="checkbox" data-path="pointer.right_click"><span class="track" aria-hidden="true"></span><span>Thumb + middle finger is a right click</span></label>
-        <label class="toggle"><input type="checkbox" data-path="pointer.scroll_enabled"><span class="track" aria-hidden="true"></span><span>Two fingers up scrolls</span></label>
-      </section>
+          <label class="slider">
+            <span class="slider-head"><span>Steadiness</span><output data-out="pointer.steadiness"></output></span>
+            <input type="range" min="0" max="100" step="1" data-path="pointer.steadiness" data-scale="100" data-fmt="pct">
+          </label>
+          <div class="field">
+            <span class="field-label">Cursor follows your</span>
+            <div class="segmented" data-path="pointer.anchor" role="radiogroup" aria-label="Cursor follows">
+              <button type="button" role="radio" data-value="knuckles">Knuckles</button>
+              <button type="button" role="radio" data-value="pinch">Fingertips</button>
+            </div>
+          </div>
+          <button type="button" class="btn primary block" data-action="calibrate">Calibrate screen area</button>
+          <p class="hint" id="customNote" hidden>Custom filter values are on (More → Filter), so Steadiness is paused.</p>
 
-      <section class="card" id="cameraCard">
-        <h2 class="card-title">Camera <span class="card-note" id="cameraNote"></span></h2>
-        <div class="field">
-          <span class="field-label">Camera</span>
-          <div class="segmented" data-phone="camera" role="radiogroup" aria-label="Camera">
-            <button type="button" role="radio" data-value="back">Back</button>
-            <button type="button" role="radio" data-value="front">Front</button>
+          <h2>Click</h2>
+          <label class="toggle"><input type="checkbox" data-path="pointer.click"><span class="track" aria-hidden="true"></span><span>Pinch thumb and index to click</span></label>
+          <div class="pinch">
+            <div class="pinch-bar" aria-hidden="true">
+              <div class="pinch-fill" id="pinchFill"></div>
+              <div class="pinch-mark on" id="pinchOn"></div>
+              <div class="pinch-mark off" id="pinchOff"></div>
+            </div>
+            <div class="pinch-text"><span id="pinchText">Finger gap –</span><span class="pinch-state" id="pinchState"></span></div>
           </div>
-        </div>
-        <div class="field">
-          <span class="field-label">Frame rate</span>
-          <div class="segmented" data-phone="fps" data-type="number" role="radiogroup" aria-label="Frame rate">
-            <button type="button" role="radio" data-value="60">60</button>
-            <button type="button" role="radio" data-value="120">120</button>
-            <button type="button" role="radio" data-value="240">240</button>
-          </div>
-        </div>
-        <label class="field">
-          <span class="field-label">Shutter</span>
-          <select data-phone="shutter" data-type="number">
-            <option value="120">1/120 s · most light</option>
-            <option value="250">1/250 s</option>
-            <option value="300">1/300 s</option>
-            <option value="360">1/360 s</option>
-            <option value="500">1/500 s · sharpest default</option>
-            <option value="750">1/750 s</option>
-            <option value="1000">1/1000 s · needs bright light</option>
-          </select>
-        </label>
-        <label class="toggle"><input type="checkbox" data-phone="crop"><span class="track" aria-hidden="true"></span><span>Hand crop <small>runs the model on a crop around your hand for sharper landmarks</small></span></label>
-        <label class="field">
-          <span class="field-label">Phone orientation</span>
-          <select data-phone="orientation" data-type="number">
-            <option value="-1">Automatic</option>
-            <option value="0">Portrait</option>
-            <option value="1">Landscape left</option>
-            <option value="2">Landscape right</option>
-            <option value="3">Upside down</option>
-          </select>
-        </label>
-        <label class="slider">
-          <span class="slider-head"><span>Zoom</span><output data-out="phone.zoom"></output></span>
-          <input type="range" min="100" max="300" step="5" data-phone="zoom" data-scale="100" data-fmt="zoom">
-        </label>
-        <label class="toggle"><input type="checkbox" data-phone="preview"><span class="track" aria-hidden="true"></span><span>Show the camera on the phone <small>costs power and heat</small></span></label>
-        <details class="sub">
-          <summary>Exposure and focus</summary>
-          <div class="details-body">
+          <label class="slider">
+            <span class="slider-head"><span>Press when the gap closes below</span><output data-out="pointer.pinch_on"></output></span>
+            <input type="range" min="10" max="50" step="1" data-path="pointer.pinch_on" data-scale="100" data-fmt="gap">
+          </label>
+          <label class="slider">
+            <span class="slider-head"><span>Release when it opens past</span><output data-out="pointer.pinch_off"></output></span>
+            <input type="range" min="15" max="80" step="1" data-path="pointer.pinch_off" data-scale="100" data-fmt="gap">
+          </label>
+          <p class="hint">Watch the bar while you pinch. A real click should cross the first mark; letting go should
+            pass the second. A wider gap between them makes clicks harder to fire by accident.</p>
+          <label class="toggle"><input type="checkbox" data-path="pointer.right_click"><span class="track" aria-hidden="true"></span><span>Thumb and middle finger right-clicks</span></label>
+          <label class="toggle"><input type="checkbox" data-path="pointer.scroll_enabled"><span class="track" aria-hidden="true"></span><span>Two fingers up scrolls</span></label>
+        </section>
+
+        <!-- Camera ----------------------------------------------------------->
+        <section class="pane" role="tabpanel" id="pane-camera" aria-labelledby="tab-camera" hidden>
+          <div id="cameraCard" class="pane-inner">
+            <p class="hint" id="cameraNote"></p>
+            <div class="field">
+              <span class="field-label">Camera</span>
+              <div class="segmented" data-phone="camera" role="radiogroup" aria-label="Camera">
+                <button type="button" role="radio" data-value="back">Back</button>
+                <button type="button" role="radio" data-value="front">Front</button>
+              </div>
+            </div>
+            <div class="field">
+              <span class="field-label">Frame rate</span>
+              <div class="segmented" data-phone="fps" data-type="number" role="radiogroup" aria-label="Frame rate">
+                <button type="button" role="radio" data-value="60">60</button>
+                <button type="button" role="radio" data-value="120">120</button>
+                <button type="button" role="radio" data-value="240">240</button>
+              </div>
+            </div>
+            <label class="field">
+              <span class="field-label">Shutter</span>
+              <select data-phone="shutter" data-type="number">
+                <option value="120">1/120 s (most light)</option>
+                <option value="250">1/250 s</option>
+                <option value="300">1/300 s</option>
+                <option value="360">1/360 s</option>
+                <option value="500">1/500 s (default)</option>
+                <option value="750">1/750 s</option>
+                <option value="1000">1/1000 s (bright rooms)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">Phone orientation</span>
+              <select data-phone="orientation" data-type="number">
+                <option value="-1">Automatic</option>
+                <option value="0">Portrait</option>
+                <option value="1">Landscape left</option>
+                <option value="2">Landscape right</option>
+                <option value="3">Upside down</option>
+              </select>
+            </label>
+            <label class="toggle"><input type="checkbox" data-phone="crop"><span class="track" aria-hidden="true"></span><span>Hand crop <small>Runs the model on a crop around your hand. Sharper landmarks.</small></span></label>
+            <label class="toggle"><input type="checkbox" data-phone="preview"><span class="track" aria-hidden="true"></span><span>Camera picture on the phone <small>Off shows the skeleton instead, which runs cooler.</small></span></label>
+            <label class="slider">
+              <span class="slider-head"><span>Zoom</span><output data-out="phone.zoom"></output></span>
+              <input type="range" min="100" max="300" step="5" data-phone="zoom" data-scale="100" data-fmt="zoom">
+            </label>
+
+            <h2>Exposure and focus</h2>
             <label class="toggle"><input type="checkbox" data-phone="iso_auto"><span class="track" aria-hidden="true"></span><span>Automatic ISO</span></label>
             <label class="slider">
               <span class="slider-head"><span>ISO ceiling</span><output data-out="phone.iso_ceiling"></output></span>
               <input type="range" min="400" max="8000" step="100" data-phone="iso_ceiling" data-fmt="int">
             </label>
-            <label class="toggle"><input type="checkbox" data-phone="focus_auto"><span class="track" aria-hidden="true"></span><span>Autofocus (near range)</span></label>
+            <label class="toggle"><input type="checkbox" data-phone="focus_auto"><span class="track" aria-hidden="true"></span><span>Autofocus</span></label>
             <label class="slider">
               <span class="slider-head"><span>Manual focus</span><output data-out="phone.lens"></output></span>
               <input type="range" min="0" max="100" step="1" data-phone="lens" data-scale="100" data-fmt="pct">
             </label>
           </div>
-        </details>
-      </section>
+        </section>
 
-      <section class="card">
-        <h2 class="card-title">Raw data</h2>
-        <p class="hint">Every frame is 21 hand landmarks with confidences. Send them to your own code.
-          The mouse doesn’t have to be involved.</p>
-        <label class="toggle"><input type="checkbox" data-path="stream.udp"><span class="track" aria-hidden="true"></span><span>UDP, one JSON frame per packet</span></label>
-        <label class="field inline">
-          <span class="field-label">to</span>
-          <input type="text" data-path="stream.udp_target" spellcheck="false" autocomplete="off">
-        </label>
-        <label class="toggle"><input type="checkbox" data-path="stream.browser"><span class="track" aria-hidden="true"></span><span>Browser stream (Server-Sent Events)</span></label>
-        <div class="code" id="browserCode" hidden><pre><code id="browserSnippet"></code></pre><button type="button" class="copy" data-copy="browserSnippet">Copy</button></div>
-        <div class="code"><pre><code id="pySnippet">from handpilot import HandStream
+        <!-- Data ------------------------------------------------------------->
+        <section class="pane" role="tabpanel" id="pane-data" aria-labelledby="tab-data" hidden>
+          <p class="lede">For your own code. Each frame carries 21 hand joints: x and y in the image, plus Apple's
+            confidence for each. You don't need any of this to use the mouse.</p>
+
+          <h2>Send while this window is open</h2>
+          <label class="toggle"><input type="checkbox" data-path="stream.udp"><span class="track" aria-hidden="true"></span><span>UDP <small>One JSON frame per packet, for any language.</small></span></label>
+          <label class="field">
+            <span class="field-label">Address</span>
+            <input type="text" data-path="stream.udp_target" spellcheck="false" autocomplete="off" aria-label="UDP address">
+          </label>
+          <label class="toggle"><input type="checkbox" data-path="stream.browser"><span class="track" aria-hidden="true"></span><span>Browser stream <small>Any web page on this computer can read it while it's on.</small></span></label>
+          <div class="code" id="browserCode" hidden><pre><code id="browserSnippet"></code></pre><button type="button" class="copy" data-copy="browserSnippet">Copy</button></div>
+
+          <h2>Or straight from the phone</h2>
+          <p class="hint">Close this window first; the phone talks to one program at a time.</p>
+          <div class="code"><pre><code id="pySnippet">from handpilot import HandStream
 
 with HandStream() as hands:
     for f in hands:
         print(f.landmark("index_tip"))</code></pre><button type="button" class="copy" data-copy="pySnippet">Copy</button></div>
-        <p class="hint">That Python snippet, or <code>python run.py --stream</code>, talks to the phone directly,
-          and the phone serves one program at a time. While this window is open, use UDP or the browser stream
-          instead. Formats are in <code>docs/data.md</code>.</p>
-        <div class="readout" id="readout">index tip –</div>
-      </section>
+          <p class="hint">Or <code>python run.py --stream</code> for JSON lines. Formats: <code>docs/data.md</code>.</p>
 
-      <details class="card" id="advanced">
-        <summary><h2 class="card-title">Advanced</h2></summary>
-        <div class="details-body">
+          <h2>Live</h2>
+          <div class="readout" id="readout">index tip –</div>
+        </section>
 
-        <h3 class="group">Connection</h3>
-        <div class="field">
-          <span class="field-label">Link</span>
-          <div class="segmented" data-path="transport" role="radiogroup" aria-label="Link">
-            <button type="button" role="radio" data-value="usb">USB cable</button>
-            <button type="button" role="radio" data-value="wifi">Wi-Fi</button>
+        <!-- More ------------------------------------------------------------->
+        <section class="pane" role="tabpanel" id="pane-more" aria-labelledby="tab-more" hidden>
+          <h2>Connection</h2>
+          <div class="field">
+            <span class="field-label">Link</span>
+            <div class="segmented" data-path="transport" role="radiogroup" aria-label="Link">
+              <button type="button" role="radio" data-value="usb">USB cable</button>
+              <button type="button" role="radio" data-value="wifi">Wi-Fi</button>
+            </div>
           </div>
-        </div>
-        <label class="field" id="wifiField">
-          <span class="field-label">iPhone IP</span>
-          <input type="text" data-path="wifi_host" placeholder="192.168.1.20" spellcheck="false" autocomplete="off">
-        </label>
-        <label class="field">
-          <span class="field-label">Port</span>
-          <input type="number" min="1" max="65535" data-path="port">
-        </label>
-        <label class="toggle"><input type="checkbox" data-path="autoconnect"><span class="track" aria-hidden="true"></span><span>Connect automatically at start</span></label>
-        <div class="row">
-          <button type="button" class="btn small" data-action="connect">Reconnect</button>
-          <button type="button" class="btn small" data-action="disconnect">Disconnect</button>
-        </div>
+          <label class="field" id="wifiField">
+            <span class="field-label">iPhone IP</span>
+            <input type="text" data-path="wifi_host" placeholder="192.168.1.20" spellcheck="false" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">Port</span>
+            <input type="number" min="1" max="65535" data-path="port">
+          </label>
+          <label class="toggle"><input type="checkbox" data-path="autoconnect"><span class="track" aria-hidden="true"></span><span>Connect automatically at start</span></label>
+          <div class="row">
+            <button type="button" class="btn small" data-action="connect">Reconnect</button>
+            <button type="button" class="btn small" data-action="disconnect">Disconnect</button>
+          </div>
 
-        <h3 class="group">Mapping</h3>
-        <label class="field">
-          <span class="field-label">Screen</span>
-          <select data-path="pointer.screen">
-            <option value="primary">Main display</option>
-            <option value="all">All displays</option>
-          </select>
-        </label>
-        <label class="toggle"><input type="checkbox" data-path="pointer.flip_x"><span class="track" aria-hidden="true"></span><span>Mirror left and right <small>on when the camera faces you</small></span></label>
-        <label class="toggle"><input type="checkbox" data-path="pointer.flip_y"><span class="track" aria-hidden="true"></span><span>Flip up and down</span></label>
+          <h2>Mapping</h2>
+          <label class="field">
+            <span class="field-label">Screen</span>
+            <select data-path="pointer.screen">
+              <option value="primary">Main display</option>
+              <option value="all">All displays</option>
+            </select>
+          </label>
+          <label class="toggle"><input type="checkbox" data-path="pointer.flip_x"><span class="track" aria-hidden="true"></span><span>Mirror left and right <small>On when the camera faces you.</small></span></label>
+          <label class="toggle"><input type="checkbox" data-path="pointer.flip_y"><span class="track" aria-hidden="true"></span><span>Flip up and down</span></label>
 
-        <h3 class="group">Filter</h3>
-        <label class="toggle"><input type="checkbox" data-path="pointer.custom_filter"><span class="track" aria-hidden="true"></span><span>Use custom values instead of Steadiness</span></label>
-        <label class="field">
-          <span class="field-label">Min cutoff (Hz)</span>
-          <input type="number" step="0.05" min="0.05" max="10" data-path="pointer.min_cutoff">
-        </label>
-        <label class="field">
-          <span class="field-label">Beta</span>
-          <input type="number" step="0.001" min="0" max="0.5" data-path="pointer.beta">
-        </label>
-        <label class="field">
-          <span class="field-label">Dead zone (px)</span>
-          <input type="number" step="0.1" min="0" max="10" data-path="pointer.deadzone_px">
-        </label>
-        <label class="slider">
-          <span class="slider-head"><span>Lead ahead</span><output data-out="pointer.lead_ms"></output></span>
-          <input type="range" min="0" max="40" step="1" data-path="pointer.lead_ms" data-fmt="ms">
-        </label>
+          <h2>Filter</h2>
+          <label class="toggle"><input type="checkbox" data-path="pointer.custom_filter"><span class="track" aria-hidden="true"></span><span>Use these values instead of Steadiness</span></label>
+          <label class="field">
+            <span class="field-label">Min cutoff (Hz)</span>
+            <input type="number" step="0.05" min="0.05" max="10" data-path="pointer.min_cutoff">
+          </label>
+          <label class="field">
+            <span class="field-label">Beta</span>
+            <input type="number" step="0.001" min="0" max="0.5" data-path="pointer.beta">
+          </label>
+          <label class="field">
+            <span class="field-label">Dead zone (px)</span>
+            <input type="number" step="0.1" min="0" max="10" data-path="pointer.deadzone_px">
+          </label>
+          <label class="slider">
+            <span class="slider-head"><span>Lead ahead</span><output data-out="pointer.lead_ms"></output></span>
+            <input type="range" min="0" max="40" step="1" data-path="pointer.lead_ms" data-fmt="ms">
+          </label>
 
-        <h3 class="group">Clicks and tracking</h3>
-        <label class="slider">
-          <span class="slider-head"><span>Click freeze radius</span><output data-out="pointer.click_freeze_px"></output></span>
-          <input type="range" min="0" max="80" step="1" data-path="pointer.click_freeze_px" data-fmt="px">
-        </label>
-        <label class="slider">
-          <span class="slider-head"><span>Click lookback</span><output data-out="pointer.anchor_lookback_ms"></output></span>
-          <input type="range" min="0" max="250" step="5" data-path="pointer.anchor_lookback_ms" data-fmt="ms">
-        </label>
-        <label class="slider">
-          <span class="slider-head"><span>Release a held click after losing the hand for</span><output data-out="pointer.lost_release_ms"></output></span>
-          <input type="range" min="50" max="1000" step="10" data-path="pointer.lost_release_ms" data-fmt="ms">
-        </label>
-        <label class="slider">
-          <span class="slider-head"><span>Ignore frames below confidence</span><output data-out="pointer.conf_min"></output></span>
-          <input type="range" min="5" max="90" step="1" data-path="pointer.conf_min" data-scale="100" data-fmt="dec">
-        </label>
-        <label class="slider">
-          <span class="slider-head"><span>Scroll speed</span><output data-out="pointer.scroll_speed"></output></span>
-          <input type="range" min="20" max="500" step="5" data-path="pointer.scroll_speed" data-scale="100" data-fmt="x">
-        </label>
+          <h2>Clicks and tracking</h2>
+          <label class="slider">
+            <span class="slider-head"><span>Click freeze radius</span><output data-out="pointer.click_freeze_px"></output></span>
+            <input type="range" min="0" max="80" step="1" data-path="pointer.click_freeze_px" data-fmt="px">
+          </label>
+          <label class="slider">
+            <span class="slider-head"><span>Click lookback</span><output data-out="pointer.anchor_lookback_ms"></output></span>
+            <input type="range" min="0" max="250" step="5" data-path="pointer.anchor_lookback_ms" data-fmt="ms">
+          </label>
+          <label class="slider">
+            <span class="slider-head"><span>Hold a click through tracking gaps of</span><output data-out="pointer.lost_release_ms"></output></span>
+            <input type="range" min="50" max="1000" step="10" data-path="pointer.lost_release_ms" data-fmt="ms">
+          </label>
+          <label class="slider">
+            <span class="slider-head"><span>Ignore frames below confidence</span><output data-out="pointer.conf_min"></output></span>
+            <input type="range" min="5" max="90" step="1" data-path="pointer.conf_min" data-scale="100" data-fmt="dec">
+          </label>
+          <label class="slider">
+            <span class="slider-head"><span>Scroll speed</span><output data-out="pointer.scroll_speed"></output></span>
+            <input type="range" min="20" max="500" step="5" data-path="pointer.scroll_speed" data-scale="100" data-fmt="x">
+          </label>
 
-        <h3 class="group">Experimental</h3>
-        <label class="toggle"><input type="checkbox" data-path="ui.experimental_gestures"><span class="track" aria-hidden="true"></span><span>Gesture mode <small>poses and swipes fire actions; less reliable than the mouse</small></span></label>
-        <div id="gestureTable" hidden></div>
+          <h2>Experimental</h2>
+          <label class="toggle"><input type="checkbox" data-path="ui.experimental_gestures"><span class="track" aria-hidden="true"></span><span>Gesture mode <small>Poses and swipes fire actions. Easier to trigger by accident than the mouse.</small></span></label>
+          <div id="gestureTable" hidden></div>
 
-        <div class="row end">
-          <button type="button" class="btn small danger" data-action="reset_pointer">Reset mouse settings</button>
-        </div>
-        <p class="hint mono" id="configPath"></p>
-        </div>
-      </details>
+          <h2>Activity</h2>
+          <pre class="log" id="log"></pre>
 
-      <details class="card" id="activity">
-        <summary><h2 class="card-title">Activity</h2></summary>
-        <div class="details-body">
-        <pre class="log" id="log"></pre>
-        </div>
-      </details>
-
-      <p class="foot" id="version"></p>
+          <div class="row end">
+            <button type="button" class="btn small danger" data-action="reset_pointer">Reset mouse settings</button>
+          </div>
+          <p class="hint mono" id="configPath"></p>
+          <p class="hint" id="version"></p>
+        </section>
+      </div>
     </aside>
   </main>
 

@@ -19,7 +19,7 @@ The window connects to the phone on its own. Over USB, Windows needs Apple's dri
 camera pointing at you, about a forearm's length away (40–70 cm). The back camera has the bigger sensor,
 which matters at fast shutter speeds.
 
-**Front camera.** Choose *Front* on the phone or in the window's Camera card. The phone then faces you
+**Front camera.** Choose *Front* on the phone or in the window's Camera tab. The phone then faces you
 like a webcam, and its screen can show the live skeleton. Its sensor is smaller, so it needs more light
 for the same sharpness.
 
@@ -28,8 +28,8 @@ left-to-right. If the skeleton looks rotated, set **Phone orientation** explicit
 stand often reports "face up", which gives *Automatic* nothing to go on.
 
 **Light the room.** At 1/500 s the camera gathers a fraction of the light it normally would, and the
-ISO it boosts to compensate turns into noise, and noise into jitter. If the **Light** tile says *too
-dark for this shutter*, add light or pick 1/250 s. A well-lit room makes a bigger difference than any
+ISO it boosts to compensate turns into noise, and noise into jitter. If the **Light** reading says *too
+dark*, add light or pick 1/250 s. A well-lit room makes a bigger difference than any
 setting.
 
 ## The window
@@ -43,9 +43,9 @@ is the **screen area**: the part of the camera's view that maps onto your monito
 point the cursor follows. The skeleton turns amber when the model is unsure about the hand, which is the
 cue for more light or a better angle.
 
-**Tiles along the bottom:**
+**Readings along the bottom:**
 
-| Tile | Meaning |
+| Reading | Meaning |
 |---|---|
 | Latency | estimated time from camera to cursor, measured live |
 | Tracking | frames per second the phone tracks, out of those it captures |
@@ -66,17 +66,18 @@ phone or change *Cursor follows your*.
 1. **Steadiness.** *Balanced* suits most people. Hold your hand still in Mouse mode and watch
    **Stillness**. If the cursor still creeps, choose *Steady*. If it feels like it trails your hand,
    choose *Responsive*.
-2. **Click sensitivity.** The bar shows the live gap between thumb and index. The green mark is where a
-   click starts. Pinch a few times and set the slider so a deliberate pinch crosses the mark and a relaxed
-   hand stays well clear.
+2. **Click thresholds.** The bar shows the live gap between thumb and index. The green mark is where a
+   click presses and the white mark is where it lets go. Pinch a few times, then set *Press* so a
+   deliberate pinch crosses the green mark, and *Release* so opening your fingers passes the white one
+   without much effort. A wider space between the two makes accidental clicks rarer.
 3. **Cursor follows your knuckles or fingertips.** Knuckles are much steadier and don't move when you
    pinch. Fingertips put the cursor between your fingers, which some people find more direct.
 4. **Frame rate.** 120 fps is the sweet spot. 240 halves the light per frame and the hand model can't
    keep up. 60 runs cooler.
 5. **Hand crop** (on by default) runs the hand model on a crop around your hand rather than the whole
-   picture, for sharper landmarks. Compare it on and off with the Stillness tile.
+   picture, for sharper landmarks. Compare it on and off with the Stillness reading.
 
-Everything else lives under **Advanced**: connection, which monitor, mirroring, raw filter values,
+Everything else lives in the **More** tab: connection, which monitor, mirroring, raw filter values,
 click timing, and experimental gestures. **Reset mouse settings** restores the defaults and keeps
 your calibrated area.
 
@@ -85,14 +86,14 @@ your calibrated area.
 - **Click.** Pinch thumb and index, then release. The cursor freezes while you pinch so a click can't
   slide into a drag.
 - **Drag.** Pinch, then move. Beyond the *click freeze radius* the cursor unfreezes and drags.
-- **Right click.** Pinch thumb and middle finger (toggle in the Click card).
-- **Scroll.** Index and middle up, the others curled, then move up or down (toggle in the Click card).
+- **Right click.** Pinch thumb and middle finger (toggle under Click).
+- **Scroll.** Index and middle up, the others curled, then move up or down (toggle under Click).
 - If tracking drops out mid-drag, the button is held briefly in case the hand comes back, then released.
 
 ## Where settings live
 
 Desktop settings are saved to `config.json` next to `run.py` (or `%APPDATA%\HandPilot\config.json`
-when installed as a package). The path is shown at the bottom of *Advanced*. Camera settings are stored
+when installed as a package). The path is shown at the bottom of the *More* tab. Camera settings are stored
 on the phone, because the phone applies them.
 
 ## Troubleshooting
@@ -104,12 +105,13 @@ on the phone, because the phone applies them.
 | "No iPhone found on USB" | Use a data cable (some only charge), unlock the phone, tap **Trust** |
 | "The iPhone didn't answer" | Open HandPilot on the phone and tap **Start**; check the port matches (9871) |
 | Connected, but no hand | Hold your hand up in view of the camera; turn up the light |
-| Skeleton rotated or upside down | Set **Phone orientation** explicitly (Camera card) |
-| Cursor moves the wrong way | Toggle **Mirror left and right** (Advanced → Mapping) |
+| Skeleton rotated or upside down | Set **Phone orientation** explicitly (Camera tab) |
+| Cursor moves the wrong way | Toggle **Mirror left and right** (More → Mapping) |
 | Cursor creeps while you hold still | *Steady* preset; more light; turn on Hand crop |
 | Cursor trails behind fast moves | *Responsive* preset |
-| Clicks fire by themselves | Lower the click sensitivity |
-| Clicks turn into small drags | Raise the click freeze radius (Advanced → Clicks and tracking) |
+| Clicks fire by themselves | Lower *Press when the gap closes below* |
+| Clicks don't release, or release late | Lower *Release when it opens past* |
+| Clicks turn into small drags | Raise the click freeze radius (More → Clicks and tracking) |
 | Can't reach the screen corners | Calibrate again with a bigger sweep |
 | Tracking well below capture fps | Drop to 120 or 60 fps |
 | iPhone says *Hot* | Drop to 60 fps; switch the phone screen to *Skeleton* (cheaper than *Camera*) |

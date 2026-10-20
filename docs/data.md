@@ -53,6 +53,12 @@ distances in equal units on both axes, multiply x by `width / height` first.
 
 **Confidence** is Vision's 0..1 confidence for that point. Below about 0.3 the point is a guess.
 
+**There is no depth.** Apple's hand-pose model is two-dimensional. For each joint it returns a
+position in the image and a confidence, and that is exactly what HandPilot sends. The only change is
+flipping y so the origin is the top left. MediaPipe's per-joint `z` is a relative estimate produced
+by its own model; Apple's model has no equivalent. Real 3D would mean pairing the joints with a depth
+sensor: TrueDepth on the front of Face ID iPhones, or LiDAR on Pro models. That isn't built in.
+
 ### The 21 landmarks
 
 Same order as MediaPipe, so code written for MediaPipe hands works unchanged.
@@ -109,7 +115,7 @@ Every frame is written, hand or not, so timestamps stay continuous. Pipe it anyw
 
 ## UDP
 
-With the HandPilot window open, switch on **Raw data → UDP**. Every frame is then sent as one JSON
+With the HandPilot window open, open the **Data** tab and switch on **UDP**. Every frame is then sent as one JSON
 datagram (the shape above, about 1.3 KB) to `127.0.0.1:9872`, or wherever you point it. Anything that
 reads UDP can use it: Python, Node, Unity, TouchDesigner, Max, Processing. A datagram arrives whole or
 not at all, so there's no framing to handle.
@@ -129,7 +135,7 @@ while True:
 
 ## Browser
 
-Switch on **Raw data → Browser stream**, and any page can subscribe:
+In the window's **Data** tab, switch on **Browser stream**, and any page can subscribe:
 
 ```js
 const hands = new EventSource("http://127.0.0.1:9870/stream");

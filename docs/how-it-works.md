@@ -128,5 +128,5 @@ step between wanting to try it and trying it, and none of the candidates would h
 ## Heat
 
 1080p at 120 fps plus continuous inference on the Neural Engine is a real thermal load, often while
-charging over the same cable. The iPhone tile shows the phone's thermal state. If it reaches *Hot*, drop
+charging over the same cable. The iPhone reading at the bottom of the window shows the phone's thermal state. If it reaches *Hot*, drop
 to 60 fps or switch the phone's screen to *Skeleton*, which is cheaper than the live camera picture.

@@ -1,60 +1,34 @@
 # HandPilot
 
-**Your iPhone, turned into a 120 fps hand tracker for your computer.**
-Steer the mouse with your hand, or just read the 21 hand landmarks from your own code.
+Hand tracking with your iPhone's camera, streamed to your computer over a USB cable at up to 120
+frames a second. Use it as a mouse, or read the 21 joint positions from your own code.
 
-![The HandPilot desktop app, tracking a (simulated) hand](docs/images/desktop.png)
+![HandPilot on Windows, tracking a hand (simulated in this screenshot)](docs/images/desktop.png)
 
-The iPhone runs Apple's hand-pose model on its Neural Engine, right next to the camera, and sends
-only the landmarks to your computer over the USB cable: 291 bytes a frame. No video ever leaves the
-phone. Every stage measures itself, so "it feels laggy" becomes a number on screen.
+Hand tracking with my laptop's webcam always felt laggy and smeared. The same idea running on my
+iPhone felt instant. Part of that is Apple's hand model running on the phone's Neural Engine, but
+mostly it's the camera: 120 frames a second instead of 30, and a 1/500 s shutter instead of about
+1/30 s, so a moving hand stays sharp. The phone sends only the joint positions, 291 bytes a frame.
+No video leaves the phone.
 
-## Why a phone beats a webcam
+## Getting started
 
-Webcam hand tracking with MediaPipe works, but it feels smeary and late. The model isn't the
-problem: measured on an ordinary laptop, MediaPipe takes about 8–18 ms a frame. **The webcam is.**
+You need an iPhone on iOS 17 or later, a Windows PC with Python 3.10 or later, and a cable.
 
-| | Laptop webcam + MediaPipe | iPhone + HandPilot |
-|---|---|---|
-| Frames per second | 30, often 15 in dim light | 60–240 |
-| Exposure per frame | ~1/30 s, automatic: a moving hand is a smear | 1/500 s, fixed: a sharp hand |
-| Hand moving 1 m/s smears by | ~3 cm, a third of your palm | ~2 mm |
-| Image processing | noise reduction that blends frames together | switched off |
-| What crosses the cable | video | 21 points |
+1. Build and install the iPhone app. You don't need a Mac: [docs/ios-build.md](docs/ios-build.md)
+   covers Codemagic, GitHub Actions and Xcode.
+2. On Windows, install Apple Devices from the Microsoft Store (it brings the USB driver) and open it
+   once with the phone plugged in.
+3. Download this repository and run `python run.py`. Nothing else to install.
+4. Open HandPilot on the phone, tap Start, and stand it about a forearm's length away with the camera
+   facing you. In the window, click Calibrate, sweep your hand over the area you want to use, then
+   switch to Mouse.
 
-A smeared hand gives smeared landmarks, and at 30 fps the newest frame is already up to 33 ms old
-before any processing starts. A phone camera fixes both, and it's in your pocket already.
-[How it works](docs/how-it-works.md) has the latency budget and the details.
+Pinch thumb and index to click, and hold the pinch to drag. F9 stops everything, from anywhere.
 
-## What you can do with it
+## Just the data
 
-- **Mouse.** The cursor follows your knuckles. Pinch thumb and index to click, hold the pinch to drag,
-  pinch thumb and middle to right-click, and hold two fingers up to scroll. **F9** releases control from
-  anywhere, even if the window is hidden.
-- **Raw data.** Stream the landmarks into Python, any language over UDP, or a web page. No mouse is
-  involved. See [docs/data.md](docs/data.md).
-- **Gestures** (experimental, off by default). Poses and swipes trigger actions such as volume or
-  next track.
-
-## Quick start
-
-1. **Get the iPhone app.** Build it in the cloud with no Mac (Codemagic or GitHub Actions, about five
-   minutes) or with Xcode, then install it with your own Apple ID.
-   → [docs/ios-build.md](docs/ios-build.md)
-2. **Run the desktop app.** You need Windows and Python 3.10 or newer, and nothing else to install.
-   Download this repository (*Code → Download ZIP*, or `git clone`), open a terminal in its folder,
-   and run:
-   ```
-   python run.py
-   ```
-3. **Connect.** Plug the iPhone in with a cable, open HandPilot on it and tap **Start**. Stand it about
-   a forearm's length away with the camera facing you. In the window, click **Calibrate screen area**,
-   sweep your hand around, then switch to **Mouse**.
-
-Windows needs Apple's USB driver to see the phone. Install the free **Apple Devices** app from the
-Microsoft Store and open it once. Or use Wi-Fi instead (Advanced → Connection).
-
-**Just want the data?** Close the app and:
+Close the window, then:
 
 ```python
 from handpilot import HandStream
@@ -62,51 +36,33 @@ from handpilot import HandStream
 with HandStream() as hands:
     for frame in hands:
         if frame.hand:
-            print(frame.landmark("index_tip"))   # (x, y, confidence), x and y in 0..1
+            print(frame.landmark("index_tip"))   # (x, y, confidence)
 ```
 
-Or run `python run.py --stream` for JSON lines, or add `--csv --out hand.csv` to record a session.
-This part also works on macOS and Linux.
+`python run.py --stream` prints the same thing as JSON lines, and works on macOS and Linux too.
+With the window open, its Data tab can forward every frame over UDP or to a web page.
+[docs/data.md](docs/data.md) has the formats.
 
-## Using it well
+## Good to know
 
-- **Light the room.** A 1/500 s shutter needs light. If the Light tile says *too dark for this
-  shutter*, turn on a lamp or choose 1/250.
-- **Steadiness** is the one smoothing control: *Responsive*, *Balanced* or *Steady*. The **Stillness**
-  tile shows how much the cursor wobbles while your hand is still. Watch it while you try them.
-- **Calibrate** to pick the area of the camera's view that becomes your screen. Choose a range you can
-  reach without moving your shoulder.
+- It needs light. The fast shutter that keeps your hand sharp also gathers less light, and a dim
+  room shows up as a noisy image and a restless cursor.
+- Pointing in mid-air is less precise than a mouse, and your arm gets tired. It's best for
+  presenting, couch control, demos and creative coding.
+- Apps installed with a free Apple ID stop opening after 7 days. Run Sideloadly again to refresh;
+  your settings are kept.
+- Mouse control is Windows-only for now. The data stream works anywhere.
 
-More in the [user guide](docs/using.md), including fixes for anything that doesn't connect.
+There's more in the [user guide](docs/using.md) and in [how it works](docs/how-it-works.md), which
+covers the latency budget and how the jitter was tamed.
 
-## Honest limitations
+## Similar projects
 
-- Pointing in mid-air is less precise than a mouse. Studies put it at roughly 2.8 bits/s (a standard
-  speed-and-accuracy score from pointing tests) against 3.7–4.9 for a mouse, and your arm gets tired.
-  It's great for presenting, couch control, demos and creative coding. It is not a mouse replacement.
-- Mouse control is Windows-only for now.
-- Apps sideloaded with a free Apple ID expire after 7 days. Re-sign with Sideloadly; your settings are
-  kept.
-- Gestures are experimental: poses are easy to trigger by accident.
+[Gesture](https://github.com/Gesture-App/gesture) drove a computer's mouse from an iPhone over
+Bluetooth back in 2022. [TrackOSC](https://github.com/JGL/TrackOSC) and
+[VisionOSC](https://github.com/LingDong-/VisionOSC) stream Apple Vision results to creative tools over
+OSC, and [Record3D](https://github.com/marek-simonik/record3d) streams iPhone depth video over USB.
+HandPilot is about latency: a high frame rate, a fast shutter, the model next to the sensor, and a
+cable instead of Wi-Fi.
 
-## Documentation
-
-| | |
-|---|---|
-| [Get the iPhone app](docs/ios-build.md) | Codemagic, GitHub Actions or Xcode, then sideloading |
-| [User guide](docs/using.md) | the window, calibration, tuning, troubleshooting |
-| [Raw data](docs/data.md) | Python API, command line, UDP, browser stream, wire format |
-| [How it works](docs/how-it-works.md) | architecture, latency, and how the jitter was fixed |
-
-## Related projects
-
-Others have connected phones and hands to computers before. [Gesture](https://github.com/Gesture-App/gesture)
-(2022) drove a computer's mouse from an iPhone over Bluetooth, sending updates about ten times a second.
-[TrackOSC](https://github.com/JGL/TrackOSC) and [VisionOSC](https://github.com/LingDong-/VisionOSC)
-stream Apple Vision results to creative tools over OSC. [Record3D](https://github.com/marek-simonik/record3d)
-streams iPhone depth video over USB. HandPilot's angle is latency: a high frame rate, a fast shutter,
-inference next to the sensor, and the cable instead of the radio.
-
-## License
-
-[MIT](LICENSE). Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+MIT licensed. Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).

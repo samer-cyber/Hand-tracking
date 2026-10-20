@@ -74,28 +74,98 @@ struct ContentView: View {
 
     private let shutterChoices: [Double] = [120, 250, 300, 360, 500, 750, 1000]
     private let fpsChoices: [Double] = [60, 120, 240]
+    /// The desktop app's accent, so the two halves look like one product.
+    private let accent = Color(red: 0.89, green: 0.647, blue: 0.282)
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                header
-                handPanel
-                startButton
-                stats
-                cameraCard
-                Text("Stand the phone a forearm's length away, camera on you. Everything here can also "
-                     + "be changed from HandPilot on your computer.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 8)
+        NavigationStack {
+            List {
+                Section {
+                    handPanel
+                        .listRowInsets(EdgeInsets())
+                }
+
+                Section {
+                    Button(action: toggleRunning) {
+                        Text(running ? "Stop" : "Start")
+                            .font(.headline)
+                            .foregroundStyle(running ? Color.red : accent)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+
+                Section("Status") {
+                    LabeledContent("Computer") {
+                        HStack(spacing: 6) {
+                            Circle().fill(connectionColor).frame(width: 8, height: 8)
+                            Text(connectionText)
+                        }
+                    }
+                    LabeledContent("Tracking", value: String(format: "%.0f fps", engine.trackedFPS))
+                    LabeledContent("Hand model", value: String(format: "%.1f ms", engine.inferenceMs))
+                    LabeledContent("Hand", value: engine.handDetected ? "Tracking" : "Not in view")
+                    LabeledContent("ISO", value: String(format: "%.0f", engine.isoValue))
+                    LabeledContent("Format", value: engine.formatSummary)
+                    if !server.lastError.isEmpty {
+                        Text(server.lastError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Section("Camera") {
+                    Picker("Camera", selection: binding(\.useFrontCamera)) {
+                        Text("Back").tag(false)
+                        Text("Front").tag(true)
+                    }
+                    Picker("Screen shows", selection: binding(\.showPreview)) {
+                        Text("Camera").tag(true)
+                        Text("Skeleton").tag(false)
+                    }
+                    Picker("Frame rate", selection: binding(\.fps)) {
+                        ForEach(fpsChoices, id: \.self) { Text("\(Int($0)) fps").tag($0) }
+                    }
+                    Picker("Shutter", selection: binding(\.shutterDenominator)) {
+                        ForEach(shutterChoices, id: \.self) { Text("1/\(Int($0)) s").tag($0) }
+                    }
+                    Toggle("Hand crop", isOn: binding(\.cropToHand))
+                }
+
+                Section {
+                    Picker("Orientation", selection: binding(\.orientationOverride)) {
+                        Text("Automatic").tag(-1)
+                        Text("Portrait").tag(0)
+                        Text("Landscape left").tag(1)
+                        Text("Landscape right").tag(2)
+                        Text("Upside down").tag(3)
+                    }
+                    Toggle("Automatic ISO", isOn: binding(\.isoAuto))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Zoom  \(store.settings.zoom, specifier: "%.1f")×")
+                        Slider(value: zoomBinding, in: 1...3, step: 0.1)
+                    }
+                    Toggle("Autofocus", isOn: binding(\.focusAuto))
+                    if !store.settings.focusAuto {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Focus  \(store.settings.lensPosition, specifier: "%.2f")")
+                            Slider(value: lensBinding, in: 0...1)
+                        }
+                    }
+                    LabeledContent("Port") {
+                        TextField("9871", text: $store.port)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                } header: {
+                    Text("More")
+                } footer: {
+                    Text("Stand the phone a forearm's length away with the camera on you. "
+                         + "Everything here can also be changed from HandPilot on your computer.")
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 20)
-            .frame(maxWidth: 620)
-            .frame(maxWidth: .infinity)
+            .navigationTitle("HandPilot")
         }
-        .background(Color.black.ignoresSafeArea())
+        .tint(accent)
         .onAppear {
             // Bound to locals first: these are the objects the escaping command
             // handler needs to outlive this call, and capturing them by name
@@ -117,29 +187,12 @@ struct ContentView: View {
         .onChange(of: store.settings) { _, new in engine.apply(new) }
     }
 
-    // MARK: - Sections
-
-    private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("HandPilot").font(.title.bold())
-                Text(connectionText)
-                    .font(.subheadline)
-                    .foregroundStyle(connectionColor)
-            }
-            Spacer()
-            Circle()
-                .fill(connectionColor)
-                .frame(width: 12, height: 12)
-                .accessibilityHidden(true)
-        }
-    }
+    // MARK: - Pieces
 
     private var connectionText: String {
-        if server.connected { return "Computer connected" }
-        if server.listening { return "Waiting for your computer" }
-        if running { return "Starting…" }
-        return "Stopped"
+        if server.connected { return "Connected" }
+        if server.listening { return "Waiting" }
+        return running ? "Starting…" : "Not running"
     }
 
     private var connectionColor: Color {
@@ -150,144 +203,29 @@ struct ContentView: View {
 
     private var handPanel: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 18).fill(Color.white.opacity(0.05))
+            Color.black
             if running && store.settings.showPreview {
                 CameraPreview(session: engine.session, device: engine.activeDevice)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
             } else {
                 SkeletonView(live: engine.liveHand, mirrored: store.settings.useFrontCamera)
                     .padding(12)
             }
             if !running {
-                VStack(spacing: 8) {
-                    Image(systemName: "hand.raised")
-                        .font(.system(size: 34))
-                    Text("Tap Start, then point the camera at yourself")
-                        .font(.callout)
-                }
-                .foregroundStyle(.secondary)
+                Text("Tap Start, then point the camera at yourself.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding()
             } else if !engine.handDetected && !store.settings.showPreview {
                 Text("No hand in view")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(height: 260)
-        .overlay(RoundedRectangle(cornerRadius: 18)
-            .stroke(engine.handDetected ? Color.green.opacity(0.85) : Color.white.opacity(0.12),
-                    lineWidth: engine.handDetected ? 2 : 1))
+        .frame(height: 240)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(engine.handDetected ? "Hand detected" : "No hand detected")
     }
-
-    private var startButton: some View {
-        Button(action: toggleRunning) {
-            Label(running ? "Stop" : "Start", systemImage: running ? "stop.fill" : "play.fill")
-                .font(.title3.bold())
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(running ? .red : .green)
-        .controlSize(.large)
-    }
-
-    private var stats: some View {
-        let columns = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10),
-                       GridItem(.flexible(), spacing: 10)]
-        return LazyVGrid(columns: columns, spacing: 10) {
-            Stat(title: "Tracking", value: String(format: "%.0f fps", engine.trackedFPS),
-                 tint: engine.captureFPS > 0 && engine.trackedFPS < engine.captureFPS * 0.8 ? .orange : .primary)
-            Stat(title: "Hand model", value: String(format: "%.1f ms", engine.inferenceMs), tint: .primary)
-            Stat(title: "Hand", value: engine.handDetected ? "Tracking" : "None",
-                 tint: engine.handDetected ? .green : .secondary)
-            Stat(title: "ISO", value: String(format: "%.0f", engine.isoValue),
-                 tint: abs(engine.exposureOffset) < 1.0 ? .primary : .orange)
-            Stat(title: "Format", value: engine.formatSummary, tint: .primary)
-            Stat(title: "Camera", value: engine.status, tint: .secondary)
-        }
-        .overlay(alignment: .bottom) {
-            if !server.lastError.isEmpty {
-                Text(server.lastError)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .offset(y: 18)
-            }
-        }
-    }
-
-    private var cameraCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Picker("Camera", selection: binding(\.useFrontCamera)) {
-                Text("Back camera").tag(false)
-                Text("Front camera").tag(true)
-            }
-            .pickerStyle(.segmented)
-
-            Picker("Phone screen shows", selection: binding(\.showPreview)) {
-                Text("Camera").tag(true)
-                Text("Skeleton").tag(false)
-            }
-            .pickerStyle(.segmented)
-
-            LabeledContent("Frame rate") {
-                Picker("Frame rate", selection: binding(\.fps)) {
-                    ForEach(fpsChoices, id: \.self) { Text("\(Int($0))").tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 190)
-            }
-
-            LabeledContent("Shutter") {
-                Picker("Shutter", selection: binding(\.shutterDenominator)) {
-                    ForEach(shutterChoices, id: \.self) { Text("1/\(Int($0)) s").tag($0) }
-                }
-            }
-
-            Toggle("Hand crop (sharper landmarks)", isOn: binding(\.cropToHand))
-
-            DisclosureGroup("More camera settings") {
-                VStack(alignment: .leading, spacing: 14) {
-                    LabeledContent("Orientation") {
-                        Picker("Orientation", selection: binding(\.orientationOverride)) {
-                            Text("Automatic").tag(-1)
-                            Text("Portrait").tag(0)
-                            Text("Landscape left").tag(1)
-                            Text("Landscape right").tag(2)
-                            Text("Upside down").tag(3)
-                        }
-                    }
-                    Toggle("Automatic ISO", isOn: binding(\.isoAuto))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Zoom  \(store.settings.zoom, specifier: "%.1f")×")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Slider(value: zoomBinding, in: 1...3, step: 0.1)
-                    }
-                    Toggle("Autofocus", isOn: binding(\.focusAuto))
-                    if !store.settings.focusAuto {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Focus  \(store.settings.lensPosition, specifier: "%.2f")")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                            Slider(value: lensBinding, in: 0...1)
-                        }
-                    }
-                    LabeledContent("Port") {
-                        TextField("9871", text: $store.port)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 90)
-                    }
-                }
-                .padding(.top, 10)
-            }
-        }
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.06)))
-    }
-
-    // MARK: - Helpers
 
     private func toggleRunning() {
         running.toggle()
@@ -313,30 +251,6 @@ struct ContentView: View {
     private var lensBinding: Binding<Double> {
         Binding(get: { Double(store.settings.lensPosition) },
                 set: { store.settings.lensPosition = Float($0) })
-    }
-}
-
-/// One live number, small enough that six fit on a phone.
-private struct Stat: View {
-    let title: String
-    let value: String
-    let tint: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(.callout, design: .monospaced).weight(.semibold))
-                .foregroundStyle(tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.06)))
-        .accessibilityElement(children: .combine)
     }
 }
 

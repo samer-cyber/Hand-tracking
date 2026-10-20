@@ -1,6 +1,6 @@
 """Receive HandPilot's UDP output: one JSON frame per datagram.
 
-In the HandPilot window, switch on Raw data > UDP (default target
+In the HandPilot window, open the Data tab and switch on UDP (default target
 127.0.0.1:9872), then run this. Any language that can read UDP can do the same.
 """
 
